@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { dashboardApi } from '@/services/api';
+import { useNavigate } from 'react-router-dom';
+import { dashboardApi, teacherApi, academicStructureApi } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { useSchool } from '@/context/SchoolContext';
 import { StatCard } from '@/components/common/StatCard';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
+import { Badge } from '@/components/common/Badge';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils';
 import {
   GraduationCap,
@@ -12,9 +16,13 @@ import {
   Receipt,
   FileSpreadsheet,
   AlertCircle,
-  TrendingUp,
   RefreshCw,
   Activity,
+  BookOpen,
+  CalendarCheck,
+  Award,
+  ChevronRight,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -27,29 +35,47 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
+import { TeacherAssignment } from '@/types/database';
 
 export const DashboardPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { user, role } = useAuth();
+  const { selectedSessionId } = useSchool();
+
   const [stats, setStats] = useState<any>(null);
+  const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState<'this_month' | 'last_3_months' | 'all'>('this_month');
 
-  const loadStats = async () => {
+  const loadDashboardData = async () => {
     setIsLoading(true);
     try {
-      const data = await dashboardApi.getLiveStatistics();
-      setStats(data);
+      const liveStats = await dashboardApi.getLiveStatistics();
+      setStats(liveStats);
+
+      if (role === 'teacher') {
+        const [allTeachers, allAssignments] = await Promise.all([
+          teacherApi.getTeachers(),
+          teacherApi.getAssignments(selectedSessionId),
+        ]);
+        const currentTeacher =
+          allTeachers.find((t) => t.email === user?.email || t.profile_id === user?.id) || allTeachers[0];
+        if (currentTeacher) {
+          const myAssignments = allAssignments.filter((a) => a.teacher_id === currentTeacher.id);
+          setTeacherAssignments(myAssignments);
+        }
+      }
     } catch (e) {
-      console.error('Failed to load dashboard statistics', e);
+      console.error('Failed to load dashboard data', e);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadStats();
-  }, [dateFilter]);
+    loadDashboardData();
+  }, [dateFilter, role, selectedSessionId]);
 
   if (isLoading || !stats) {
     return (
@@ -64,14 +90,211 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  // Financial chart data
+  // -------------------------------------------------------------
+  // TEACHER DASHBOARD VIEW (Role-Scoped: Attendance & Exams only)
+  // -------------------------------------------------------------
+  if (role === 'teacher') {
+    const isClassTeacher = teacherAssignments.some((a) => a.is_class_teacher);
+    const classTeacherAssignment = teacherAssignments.find((a) => a.is_class_teacher);
+
+    const teacherAttendancePie = [
+      { name: 'Present', value: stats.todayAttendance.present, color: '#10b981' },
+      { name: 'Absent', value: stats.todayAttendance.absent, color: '#f43f5e' },
+      { name: 'On Leave', value: stats.todayAttendance.leave, color: '#0ea5e9' },
+    ].filter((d) => d.value > 0);
+
+    return (
+      <div className="space-y-6">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
+                Teacher Academic Portal
+              </h1>
+              <Badge variant="success">Faculty Access</Badge>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Welcome, <b>{user?.full_name}</b> — Scoped access to assigned classes, attendance and exam grading
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={loadDashboardData} title="Refresh Live Data">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Teacher KPI Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Assigned Classes"
+            value={teacherAssignments.length}
+            subtitle={teacherAssignments.map((a) => `${a.section?.class?.name}-${a.section?.name}`).join(', ') || 'No classes'}
+            icon={<School className="w-5 h-5" />}
+            color="navy"
+          />
+
+          <StatCard
+            title="Class In-charge"
+            value={isClassTeacher ? `${classTeacherAssignment?.section?.class?.name}-${classTeacherAssignment?.section?.name}` : 'Subject Teacher'}
+            subtitle={isClassTeacher ? 'Authorized to mark official attendance' : 'Subject instruction faculty'}
+            icon={<Users className="w-5 h-5" />}
+            color={isClassTeacher ? 'emerald' : 'blue'}
+          />
+
+          <StatCard
+            title="Today's Attendance"
+            value={`${stats.todayAttendance.percentage}%`}
+            subtitle={`${stats.todayAttendance.present} Present, ${stats.todayAttendance.absent} Absent`}
+            icon={<ClipboardCheck className="w-5 h-5" />}
+            color={stats.todayAttendance.percentage >= 85 ? 'emerald' : 'amber'}
+          />
+
+          <StatCard
+            title="Upcoming Exams"
+            value={stats.upcomingExams?.length || 0}
+            subtitle="Scheduled terms & evaluations"
+            icon={<FileSpreadsheet className="w-5 h-5" />}
+            color="blue"
+          />
+        </div>
+
+        {/* Quick Action Navigation Bar for Teachers */}
+        <div className="p-4 bg-gradient-to-r from-navy-900 to-brand-800 rounded-xl text-white flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-sm">Faculty Academic Tasks</h3>
+            <p className="text-xs text-brand-200 mt-0.5">
+              Take daily class attendance or enter examination marks for your authorized sections
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              leftIcon={<CalendarCheck className="w-4 h-4" />}
+              onClick={() => navigate('/attendance')}
+            >
+              Mark Attendance
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              leftIcon={<Award className="w-4 h-4" />}
+              onClick={() => navigate('/results-report-cards')}
+            >
+              Enter Marks
+            </Button>
+          </div>
+        </div>
+
+        {/* Teacher Grids: Authorized Classes & Scheduled Exams */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* My Authorized Teaching Classes & Subjects */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-brand-600" />
+                <CardTitle>My Teaching Allocations (Active Session)</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {teacherAssignments.length > 0 ? (
+                teacherAssignments.map((a) => (
+                  <div
+                    key={a.id}
+                    className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                          {a.subject?.name}
+                        </span>
+                        <span className="text-xs font-mono text-slate-400">({a.subject?.code})</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {a.section?.class?.name} — Section {a.section?.name}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {a.is_class_teacher && (
+                        <Badge variant="success">Class In-charge</Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate('/attendance')}
+                        className="text-xs py-1"
+                      >
+                        Attendance
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 text-xs text-slate-400">
+                  <p>No teaching allocations found for the active session.</p>
+                  <p className="mt-1">Please contact the school administrator to configure your subject allocations.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Upcoming Examinations */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-brand-600" />
+                <CardTitle>Upcoming Academic Examinations</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {stats.upcomingExams && stats.upcomingExams.length > 0 ? (
+                stats.upcomingExams.map((exam: any) => (
+                  <div
+                    key={exam.id}
+                    className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between"
+                  >
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {exam.name}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {formatDate(exam.start_date)} — {formatDate(exam.end_date)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/results-report-cards')}
+                      className="text-xs"
+                    >
+                      Grading Roster
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-slate-500 text-center py-6">No scheduled examinations.</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // ADMINISTRATOR DASHBOARD VIEW (Full ERP & Financial Oversight)
+  // -------------------------------------------------------------
   const financeChartData = [
     { name: 'Total Invoiced', amount: stats.financial.totalInvoiced },
     { name: 'Collected', amount: stats.financial.totalCollected },
     { name: 'Outstanding Dues', amount: stats.financial.totalOutstanding },
   ];
 
-  // Attendance distribution data
   const attendancePieData = [
     { name: 'Present', value: stats.todayAttendance.present, color: '#10b981' },
     { name: 'Absent', value: stats.todayAttendance.absent, color: '#f43f5e' },
@@ -83,9 +306,14 @@ export const DashboardPage: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-            Institutional Dashboard
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
+              Institutional Dashboard
+            </h1>
+            <Badge variant="default" className="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+              Administrator Oversight
+            </Badge>
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Real-time administrative, financial and attendance metrics
           </p>
@@ -101,7 +329,7 @@ export const DashboardPage: React.FC = () => {
             <option value="last_3_months">Last 3 Months</option>
             <option value="all">Entire Academic Year</option>
           </select>
-          <Button variant="outline" size="sm" onClick={loadStats} title="Refresh Live Data">
+          <Button variant="outline" size="sm" onClick={loadDashboardData} title="Refresh Live Data">
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
         </div>

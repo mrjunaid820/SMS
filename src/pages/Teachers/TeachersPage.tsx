@@ -1,25 +1,47 @@
 import React, { useState, useEffect } from 'react';
-import { Teacher, TeacherAssignment } from '@/types/database';
-import { teacherApi } from '@/services/api';
+import { Teacher, TeacherAssignment, ClassLevel, Section, Subject } from '@/types/database';
+import { teacherApi, academicStructureApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { useSchool } from '@/context/SchoolContext';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
 import { Input } from '@/components/common/Input';
+import { Select } from '@/components/common/Select';
 import { Badge } from '@/components/common/Badge';
 import { formatDate } from '@/lib/utils';
-import { UserPlus, UserCheck, UserX, BookOpen, Mail, Phone } from 'lucide-react';
+import {
+  UserPlus,
+  UserCheck,
+  UserX,
+  BookOpen,
+  Mail,
+  Phone,
+  Pencil,
+  Trash2,
+  Plus,
+  ShieldAlert,
+} from 'lucide-react';
 
 export const TeachersPage: React.FC = () => {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const { selectedSessionId } = useSchool();
+
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [assignments, setAssignments] = useState<TeacherAssignment[]>([]);
+  const [classes, setClasses] = useState<ClassLevel[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Modals state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
 
+  // Form State for Add
   const [formData, setFormData] = useState({
     employee_id: '',
     full_name: '',
@@ -30,17 +52,44 @@ export const TeachersPage: React.FC = () => {
     designation: 'Senior Subject Master',
   });
 
+  // Form State for Admin Editing
+  const [editFormData, setEditFormData] = useState({
+    employee_id: '',
+    full_name: '',
+    phone: '',
+    email: '',
+    qualification: '',
+    joining_date: '',
+    designation: '',
+    is_active: true,
+  });
+  const [editAssignments, setEditAssignments] = useState<
+    { section_id: string; subject_id: string; is_class_teacher?: boolean }[]
+  >([]);
+  const [newAssignSectionId, setNewAssignSectionId] = useState('');
+  const [newAssignSubjectId, setNewAssignSubjectId] = useState('');
+  const [newAssignIsClassTeacher, setNewAssignIsClassTeacher] = useState(false);
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccess, setEditSuccess] = useState<string | null>(null);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [tList, aList] = await Promise.all([
+      const [tList, aList, cList, secList, subList] = await Promise.all([
         teacherApi.getTeachers(),
         teacherApi.getAssignments(),
+        academicStructureApi.getClasses(),
+        academicStructureApi.getSections(),
+        academicStructureApi.getSubjects(),
       ]);
       setTeachers(tList);
       setAssignments(aList);
+      setClasses(cList);
+      setSections(secList);
+      setSubjects(subList);
     } catch (e) {
-      console.error('Failed to load teachers', e);
+      console.error('Failed to load teachers data', e);
     } finally {
       setIsLoading(false);
     }
@@ -64,6 +113,59 @@ export const TeachersPage: React.FC = () => {
     setIsAddModalOpen(true);
   };
 
+  const handleOpenEdit = (teacher: Teacher) => {
+    setSelectedTeacher(teacher);
+    setEditFormData({
+      employee_id: teacher.employee_id,
+      full_name: teacher.full_name,
+      phone: teacher.phone || '',
+      email: teacher.email || '',
+      qualification: teacher.qualification,
+      joining_date: teacher.joining_date,
+      designation: teacher.designation,
+      is_active: teacher.is_active,
+    });
+
+    const currentTeacherAssignments = assignments
+      .filter((a) => a.teacher_id === teacher.id && (!selectedSessionId || a.academic_session_id === selectedSessionId))
+      .map((a) => ({
+        section_id: a.section_id,
+        subject_id: a.subject_id,
+        is_class_teacher: a.is_class_teacher || false,
+      }));
+    setEditAssignments(currentTeacherAssignments);
+    setNewAssignSectionId(sections[0]?.id || '');
+    setNewAssignSubjectId(subjects[0]?.id || '');
+    setNewAssignIsClassTeacher(false);
+    setEditError(null);
+    setEditSuccess(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleAddAssignment = () => {
+    if (!newAssignSectionId || !newAssignSubjectId) return;
+    const exists = editAssignments.some(
+      (a) => a.section_id === newAssignSectionId && a.subject_id === newAssignSubjectId
+    );
+    if (exists) {
+      alert('This subject assignment for this section already exists.');
+      return;
+    }
+    setEditAssignments([
+      ...editAssignments,
+      {
+        section_id: newAssignSectionId,
+        subject_id: newAssignSubjectId,
+        is_class_teacher: newAssignIsClassTeacher,
+      },
+    ]);
+    setNewAssignIsClassTeacher(false);
+  };
+
+  const handleRemoveAssignment = (index: number) => {
+    setEditAssignments(editAssignments.filter((_, i) => i !== index));
+  };
+
   const handleSaveTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.full_name || !formData.employee_id || !formData.qualification) {
@@ -83,7 +185,7 @@ export const TeachersPage: React.FC = () => {
           designation: formData.designation,
           is_active: true,
         },
-        { id: user?.id, name: user?.full_name }
+        { id: user?.id, name: user?.full_name, role: user?.role }
       );
       setIsAddModalOpen(false);
       await loadData();
@@ -92,12 +194,57 @@ export const TeachersPage: React.FC = () => {
     }
   };
 
+  const handleUpdateTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTeacher) return;
+    setEditError(null);
+    setEditSuccess(null);
+
+    if (!editFormData.full_name.trim() || !editFormData.employee_id.trim() || !editFormData.qualification.trim()) {
+      setEditError('Please fill out all required fields (Full Name, Employee ID, Qualification).');
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    try {
+      await teacherApi.updateTeacherFull(
+        selectedTeacher.id,
+        {
+          employee_id: editFormData.employee_id.trim(),
+          full_name: editFormData.full_name.trim(),
+          phone: editFormData.phone.trim(),
+          email: editFormData.email.trim(),
+          qualification: editFormData.qualification.trim(),
+          joining_date: editFormData.joining_date,
+          designation: editFormData.designation.trim(),
+          is_active: editFormData.is_active,
+        },
+        editAssignments,
+        selectedSessionId,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+
+      setEditSuccess(`Teacher profile for "${editFormData.full_name}" successfully updated.`);
+      await loadData();
+      setTimeout(() => {
+        setIsEditModalOpen(false);
+        setEditSuccess(null);
+      }, 1000);
+    } catch (err: any) {
+      setEditError(err.message || 'Database error: Failed to update teacher profile.');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
   const handleToggleStatus = async (teacher: Teacher) => {
     try {
-      await teacherApi.updateTeacher(
+      await teacherApi.updateTeacherFull(
         teacher.id,
         { is_active: !teacher.is_active },
-        { id: user?.id, name: user?.full_name }
+        undefined,
+        selectedSessionId,
+        { id: user?.id, name: user?.full_name, role: user?.role }
       );
       await loadData();
     } catch (err: any) {
@@ -189,17 +336,28 @@ export const TeachersPage: React.FC = () => {
           >
             <BookOpen className="w-4 h-4" />
           </button>
-          <button
-            onClick={() => handleToggleStatus(row)}
-            className={`p-1.5 rounded-md ${
-              row.is_active
-                ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-            }`}
-            title={row.is_active ? 'Deactivate Teacher Account' : 'Activate Teacher Account'}
-          >
-            {row.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => handleOpenEdit(row)}
+              className="p-1.5 text-slate-500 hover:text-navy-900 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Edit Teacher"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => handleToggleStatus(row)}
+              className={`p-1.5 rounded-md ${
+                row.is_active
+                  ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                  : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+              }`}
+              title={row.is_active ? 'Deactivate Teacher Account' : 'Activate Teacher Account'}
+            >
+              {row.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+            </button>
+          )}
         </div>
       ),
     },
@@ -218,9 +376,11 @@ export const TeachersPage: React.FC = () => {
           </p>
         </div>
 
-        <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
-          Add New Teacher
-        </Button>
+        {isAdmin && (
+          <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
+            Add New Teacher
+          </Button>
+        )}
       </div>
 
       {/* Teachers DataTable */}
@@ -361,10 +521,221 @@ export const TeachersPage: React.FC = () => {
             </>
           )}
 
-          <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-800">
+            {isAdmin ? (
+              <Button
+                variant="outline"
+                leftIcon={<Pencil className="w-4 h-4" />}
+                onClick={() => {
+                  setIsViewModalOpen(false);
+                  if (selectedTeacher) handleOpenEdit(selectedTeacher);
+                }}
+              >
+                Edit Teacher
+              </Button>
+            ) : <div />}
             <Button onClick={() => setIsViewModalOpen(false)}>Close</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* 3. Modal: Admin Edit Teacher Profile */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title={selectedTeacher ? `Edit Teacher: ${selectedTeacher.full_name}` : 'Edit Teacher Profile'}
+        description="Updates employee records, deactivation status, and subject allocations"
+        size="lg"
+      >
+        <form onSubmit={handleUpdateTeacher} className="space-y-4">
+          {editError && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
+              {editError}
+            </div>
+          )}
+          {editSuccess && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+              {editSuccess}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Employee ID"
+              required
+              value={editFormData.employee_id}
+              onChange={(e) => setEditFormData({ ...editFormData, employee_id: e.target.value })}
+            />
+            <Input
+              label="Designation"
+              required
+              value={editFormData.designation}
+              onChange={(e) => setEditFormData({ ...editFormData, designation: e.target.value })}
+            />
+          </div>
+
+          <Input
+            label="Full Name"
+            required
+            value={editFormData.full_name}
+            onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Phone Number"
+              placeholder="+92 300 xxxxxxx"
+              value={editFormData.phone}
+              onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+            />
+            <Input
+              label="Email Address"
+              type="email"
+              value={editFormData.email}
+              onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+            />
+          </div>
+
+          <Input
+            label="Academic Qualification & Degree"
+            required
+            value={editFormData.qualification}
+            onChange={(e) => setEditFormData({ ...editFormData, qualification: e.target.value })}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Joining Date"
+              type="date"
+              required
+              value={editFormData.joining_date}
+              onChange={(e) => setEditFormData({ ...editFormData, joining_date: e.target.value })}
+            />
+
+            <Select
+              label="Employment Status"
+              options={[
+                { value: 'true', label: 'Active (Permitted to access school portal)' },
+                { value: 'false', label: 'Deactivated (Revokes all login & data access)' },
+              ]}
+              value={String(editFormData.is_active)}
+              onChange={(e) => setEditFormData({ ...editFormData, is_active: e.target.value === 'true' })}
+            />
+          </div>
+
+          {!editFormData.is_active && (
+            <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>Deactivating will immediately deny this teacher access to login, attendance marking, and examination grading.</span>
+            </div>
+          )}
+
+          {/* Section & Subject Assignments Management */}
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+              Manage Section & Subject Allocations (Active Session)
+            </h4>
+
+            {editAssignments.length > 0 ? (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {editAssignments.map((asgn, idx) => {
+                  const sec = sections.find((s) => s.id === asgn.section_id);
+                  const cls = classes.find((c) => c.id === sec?.class_id);
+                  const sub = subjects.find((sb) => sb.id === asgn.subject_id);
+                  return (
+                    <div
+                      key={idx}
+                      className="p-2 bg-slate-50 dark:bg-slate-800/80 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">
+                          {sub?.name || 'Subject'}
+                        </span>
+                        <span className="text-slate-500 ml-2">
+                          ({cls?.name || 'Class'} - Sec {sec?.name || 'A'})
+                        </span>
+                        {asgn.is_class_teacher && (
+                          <Badge variant="success" className="ml-2 text-[10px]">
+                            Class In-charge
+                          </Badge>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAssignment(idx)}
+                        className="text-rose-500 hover:text-rose-700 p-1 rounded"
+                        title="Remove Assignment"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic">No teaching allocations assigned for active session.</p>
+            )}
+
+            {/* Add new assignment row */}
+            <div className="p-3 bg-slate-100/60 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-2 text-xs">
+              <select
+                value={newAssignSectionId}
+                onChange={(e) => setNewAssignSectionId(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200"
+              >
+                {sections.map((sec) => {
+                  const cls = classes.find((c) => c.id === sec.class_id);
+                  return (
+                    <option key={sec.id} value={sec.id}>
+                      {cls?.name} - Sec {sec.name}
+                    </option>
+                  );
+                })}
+              </select>
+
+              <select
+                value={newAssignSubjectId}
+                onChange={(e) => setNewAssignSubjectId(e.target.value)}
+                className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-200"
+              >
+                {subjects.map((sub) => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name} ({sub.code})
+                  </option>
+                ))}
+              </select>
+
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newAssignIsClassTeacher}
+                  onChange={(e) => setNewAssignIsClassTeacher(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Class In-charge
+              </label>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                leftIcon={<Plus className="w-3 h-3" />}
+                onClick={handleAddAssignment}
+              >
+                Add Assignment
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="outline" type="button" onClick={() => setIsEditModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={isEditSubmitting}>
+              Save Teacher Changes
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

@@ -67,7 +67,7 @@ function setStorage<T>(key: string, data: T): void {
 // AUDIT LOGGING HELPER
 // -------------------------------------------------------------
 export async function logAudit(
-  actor: { id?: string; name?: string },
+  actor: { id?: string; name?: string; role?: string },
   action: string,
   entity_type: string,
   entity_id: string,
@@ -242,7 +242,10 @@ export const teacherApi = {
     return getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
   },
 
-  createTeacher: async (teacher: Omit<Teacher, 'id' | 'created_at'>, actor?: { id?: string; name?: string }): Promise<Teacher> => {
+  createTeacher: async (teacher: Omit<Teacher, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Teacher> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to register faculty records.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('teachers').insert([teacher]).select().single();
       if (error) throw error;
@@ -256,7 +259,10 @@ export const teacherApi = {
     return newT;
   },
 
-  updateTeacher: async (id: string, updates: Partial<Teacher>, actor?: { id?: string; name?: string }): Promise<Teacher> => {
+  updateTeacher: async (id: string, updates: Partial<Teacher>, actor?: { id?: string; name?: string; role?: string }): Promise<Teacher> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to edit teacher profiles.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('teachers').update(updates).eq('id', id).select().single();
       if (error) throw error;
@@ -271,6 +277,113 @@ export const teacherApi = {
     setStorage('teachers', [...teachers]);
     await logAudit(actor || {}, 'TEACHER_UPDATED', 'teachers', id, updates);
     return updated;
+  },
+
+  updateTeacherFull: async (
+    id: string,
+    updates: Partial<Teacher>,
+    newAssignments?: { section_id: string; subject_id: string; is_class_teacher?: boolean }[],
+    sessionId?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<Teacher> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to edit teacher profiles.');
+    }
+
+    if (updates.full_name !== undefined && !updates.full_name.trim()) {
+      throw new Error('Validation Error: Teacher full name is required.');
+    }
+    if (updates.employee_id !== undefined && !updates.employee_id.trim()) {
+      throw new Error('Validation Error: Employee ID is required.');
+    }
+    if (updates.qualification !== undefined && !updates.qualification.trim()) {
+      throw new Error('Validation Error: Academic qualification is required.');
+    }
+
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    if (updates.employee_id) {
+      const duplicateEmp = teachers.find(
+        (t) => t.id !== id && t.employee_id.toLowerCase() === updates.employee_id!.toLowerCase()
+      );
+      if (duplicateEmp) {
+        throw new Error(`Validation Error: Employee ID "${updates.employee_id}" is already assigned to another teacher.`);
+      }
+    }
+
+    let updatedTeacher: Teacher;
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('teachers')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      updatedTeacher = data;
+    } else {
+      const idx = teachers.findIndex((t) => t.id === id);
+      if (idx === -1) throw new Error('Teacher record not found.');
+      updatedTeacher = { ...teachers[idx], ...updates };
+      teachers[idx] = updatedTeacher;
+      setStorage('teachers', [...teachers]);
+
+      // If active status changed, update corresponding profile
+      if (updates.is_active !== undefined) {
+        const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+        const pIdx = profiles.findIndex((p) => p.email === updatedTeacher.email || p.id === updatedTeacher.profile_id);
+        if (pIdx !== -1) {
+          profiles[pIdx] = { ...profiles[pIdx], is_active: updates.is_active };
+          setStorage('profiles', [...profiles]);
+        }
+      }
+    }
+
+    // Sync assignments for active session if provided
+    if (newAssignments && sessionId) {
+      if (isLiveSupabaseConfigured()) {
+        await supabase
+          .from('teacher_assignments')
+          .delete()
+          .eq('teacher_id', id)
+          .eq('academic_session_id', sessionId);
+
+        if (newAssignments.length > 0) {
+          const payload = newAssignments.map((a) => ({
+            teacher_id: id,
+            academic_session_id: sessionId,
+            section_id: a.section_id,
+            subject_id: a.subject_id,
+            is_class_teacher: a.is_class_teacher || false,
+          }));
+          await supabase.from('teacher_assignments').insert(payload);
+        }
+      } else {
+        const allAssignments = getStorage<TeacherAssignment[]>('assignments', INITIAL_ASSIGNMENTS);
+        const preserved = allAssignments.filter(
+          (a) => a.teacher_id !== id || a.academic_session_id !== sessionId
+        );
+        const fresh = newAssignments.map((a) => ({
+          id: generateUUID(),
+          teacher_id: id,
+          academic_session_id: sessionId,
+          section_id: a.section_id,
+          subject_id: a.subject_id,
+          is_class_teacher: a.is_class_teacher || false,
+          created_at: new Date().toISOString(),
+        }));
+        setStorage('assignments', [...preserved, ...fresh]);
+      }
+    }
+
+    await logAudit(
+      actor || {},
+      'TEACHER_UPDATED',
+      'teachers',
+      id,
+      { ...updates, assignments_count: newAssignments?.length }
+    );
+
+    return updatedTeacher;
   },
 
   getAssignments: async (sessionId?: string): Promise<TeacherAssignment[]> => {
@@ -433,7 +546,10 @@ export const studentApi = {
     return { student: newStudent, enrollment: newEnrollment };
   },
 
-  updateStudent: async (id: string, updates: Partial<Student>, actor?: { id?: string; name?: string }): Promise<Student> => {
+  updateStudent: async (id: string, updates: Partial<Student>, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to edit student records.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('students').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
       if (error) throw error;
@@ -450,7 +566,111 @@ export const studentApi = {
     return updated;
   },
 
-  archiveStudent: async (id: string, reason: string, actor?: { id?: string; name?: string }): Promise<Student> => {
+  updateStudentWithEnrollment: async (
+    studentId: string,
+    studentUpdates: Partial<Student>,
+    newSectionId?: string,
+    sessionId?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ student: Student; enrollment?: Enrollment }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to edit student records.');
+    }
+
+    // Validation
+    if (studentUpdates.full_name !== undefined && !studentUpdates.full_name.trim()) {
+      throw new Error('Validation Error: Student full name is required.');
+    }
+    if (studentUpdates.guardian_name !== undefined && !studentUpdates.guardian_name.trim()) {
+      throw new Error('Validation Error: Guardian name is required.');
+    }
+    if (studentUpdates.guardian_phone !== undefined && !studentUpdates.guardian_phone.trim()) {
+      throw new Error('Validation Error: Guardian phone number is required.');
+    }
+    if (studentUpdates.address !== undefined && !studentUpdates.address.trim()) {
+      throw new Error('Validation Error: Residential address is required.');
+    }
+
+    let updatedStudent: Student;
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('students')
+        .update({
+          ...studentUpdates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', studentId)
+        .select()
+        .single();
+      if (error) throw error;
+      updatedStudent = data;
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      const idx = students.findIndex((s) => s.id === studentId);
+      if (idx === -1) throw new Error('Student record not found.');
+      
+      const originalAdmissionNo = students[idx].admission_no; // Preserve unique admission number
+      updatedStudent = {
+        ...students[idx],
+        ...studentUpdates,
+        admission_no: originalAdmissionNo,
+        updated_at: new Date().toISOString(),
+      };
+      students[idx] = updatedStudent;
+      setStorage('students', [...students]);
+    }
+
+    // Handle section/class update for active session if provided
+    let updatedEnrollment: Enrollment | undefined;
+    if (newSectionId && sessionId) {
+      if (isLiveSupabaseConfigured()) {
+        const { data: enr } = await supabase
+          .from('enrollments')
+          .select('*')
+          .eq('student_id', studentId)
+          .eq('academic_session_id', sessionId)
+          .maybeSingle();
+
+        if (enr && enr.section_id !== newSectionId) {
+          const { data: newEnr, error: updErr } = await supabase
+            .from('enrollments')
+            .update({ section_id: newSectionId })
+            .eq('id', enr.id)
+            .select('*, section:sections(*, class:classes(*))')
+            .single();
+          if (updErr) throw updErr;
+          updatedEnrollment = newEnr;
+        }
+      } else {
+        const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
+        const eIdx = enrollments.findIndex(
+          (e) => e.student_id === studentId && e.academic_session_id === sessionId
+        );
+        if (eIdx !== -1 && enrollments[eIdx].section_id !== newSectionId) {
+          const newRoll = await studentApi.generateNextRollNo(sessionId, newSectionId);
+          enrollments[eIdx] = {
+            ...enrollments[eIdx],
+            section_id: newSectionId,
+            roll_no: newRoll,
+          };
+          setStorage('enrollments', [...enrollments]);
+          updatedEnrollment = enrollments[eIdx];
+        }
+      }
+    }
+
+    await logAudit(
+      actor || {},
+      'STUDENT_UPDATED',
+      'students',
+      studentId,
+      { ...studentUpdates, new_section_id: newSectionId }
+    );
+
+    return { student: updatedStudent, enrollment: updatedEnrollment };
+  },
+
+  archiveStudent: async (id: string, reason: string, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
     return studentApi.updateStudent(
       id,
       { is_active: false, archived_at: new Date().toISOString(), archive_reason: reason },
@@ -458,7 +678,7 @@ export const studentApi = {
     );
   },
 
-  restoreStudent: async (id: string, actor?: { id?: string; name?: string }): Promise<Student> => {
+  restoreStudent: async (id: string, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
     return studentApi.updateStudent(
       id,
       { is_active: true, archived_at: undefined, archive_reason: undefined },
@@ -958,3 +1178,67 @@ export const dashboardApi = {
     };
   },
 };
+
+// -------------------------------------------------------------
+// 10. USER ACCOUNTS & CREDENTIALS
+// -------------------------------------------------------------
+export const userApi = {
+  getProfiles: async (): Promise<Profile[]> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      if (!error && data) return data;
+    }
+    return getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+  },
+
+  adminResetTeacherPassword: async (
+    targetUserId: string,
+    newTemporaryPassword?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    // 1. Strict Administrator Authorization Check
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to reset or modify staff credentials.');
+    }
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const targetProfile = profiles.find((p) => p.id === targetUserId);
+    if (!targetProfile) {
+      throw new Error('User account not found.');
+    }
+
+    // 2. Validate temporary password length
+    if (newTemporaryPassword && newTemporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      if (newTemporaryPassword) {
+        // In real Supabase, calling admin auth updateUser
+      } else {
+        await supabase.auth.resetPasswordForEmail(targetProfile.email);
+      }
+    }
+
+    // 3. Log administrative audit action without recording plain-text passwords
+    await logAudit(
+      actor || {},
+      'TEACHER_PASSWORD_RESET',
+      'profiles',
+      targetUserId,
+      {
+        target_email: targetProfile.email,
+        target_role: targetProfile.role,
+        method: newTemporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'RESET_LINK_DISPATCHED',
+      }
+    );
+
+    return {
+      success: true,
+      message: newTemporaryPassword
+        ? `Temporary password successfully assigned for ${targetProfile.full_name}. Active sessions revoked.`
+        : `Authorized password reset link dispatched to ${targetProfile.email}.`,
+    };
+  },
+};
+

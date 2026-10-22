@@ -74,14 +74,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       if (isLiveSupabaseConfigured()) {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password: 'password123',
         });
         if (error) throw error;
+        if (data?.user) {
+          const { data: profile, error: profErr } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+          if (profErr || !profile) {
+            throw new Error('User profile record not found in authorization directory.');
+          }
+          if (profile.is_active === false) {
+            await supabase.auth.signOut();
+            throw new Error('Your account has been deactivated. Please contact the school administrator.');
+          }
+          setUser(profile);
+          localStorage.setItem('sms_current_user', JSON.stringify(profile));
+        }
       } else {
-        const matched = INITIAL_PROFILES.find((p) => p.email === email) || {
-          id: 'u0000000-0000-0000-0000-000000000001',
+        const profiles: Profile[] = (() => {
+          try {
+            const saved = localStorage.getItem('sms_profiles');
+            if (saved) return JSON.parse(saved);
+          } catch {}
+          return INITIAL_PROFILES;
+        })();
+
+        const matched = profiles.find((p) => p.email.toLowerCase() === email.toLowerCase()) || {
+          id: role === 'admin' ? 'u0000000-0000-0000-0000-000000000001' : 'u0000000-0000-0000-0000-000000000002',
           role,
           full_name: role === 'admin' ? 'Administrator (Principal)' : 'Muhammad Tariq (Teacher)',
           email,
@@ -89,6 +113,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
+
+        if (matched.is_active === false) {
+          throw new Error('Your account has been deactivated. Please contact the school administrator.');
+        }
+
         setUser(matched);
         localStorage.setItem('sms_current_user', JSON.stringify(matched));
       }

@@ -24,10 +24,12 @@ import {
   Printer,
   CheckCircle2,
   AlertTriangle,
+  Pencil,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const { settings, currentSession, selectedSessionId } = useSchool();
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -52,7 +54,7 @@ export const StudentsPage: React.FC = () => {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
 
-  // Form State for Add / Edit
+  // Form State for Add
   const [formData, setFormData] = useState({
     full_name: '',
     gender: 'Male' as 'Male' | 'Female' | 'Other',
@@ -69,6 +71,28 @@ export const StudentsPage: React.FC = () => {
     class_id: '',
     section_id: '',
   });
+
+  // Form State for Admin Editing
+  const [editFormData, setEditFormData] = useState({
+    full_name: '',
+    gender: 'Male' as 'Male' | 'Female' | 'Other',
+    date_of_birth: '2010-01-01',
+    b_form_or_cnic: '',
+    guardian_name: '',
+    guardian_relation: 'Father',
+    guardian_cnic: '',
+    guardian_phone: '',
+    emergency_contact: '',
+    address: '',
+    blood_group: 'B+',
+    admission_date: '',
+    photo_url: '',
+    class_id: '',
+    section_id: '',
+  });
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSuccess, setEditSuccess] = useState<string | null>(null);
 
   // CSV Import State
   const [csvPreview, setCsvPreview] = useState<{
@@ -107,6 +131,11 @@ export const StudentsPage: React.FC = () => {
     return sections.filter((s) => s.class_id === formData.class_id);
   }, [sections, formData.class_id]);
 
+  const availableEditSections = useMemo(() => {
+    if (!editFormData.class_id) return [];
+    return sections.filter((s) => s.class_id === editFormData.class_id);
+  }, [sections, editFormData.class_id]);
+
   const handleOpenAdd = () => {
     setFormData({
       full_name: '',
@@ -125,6 +154,80 @@ export const StudentsPage: React.FC = () => {
       section_id: sections.find((s) => s.class_id === classes[0]?.id)?.id || '',
     });
     setIsAddModalOpen(true);
+  };
+
+  const handleOpenEdit = (student: Student) => {
+    const enr = enrollments.find((e) => e.student_id === student.id);
+    setSelectedStudent(student);
+    const clsId = enr?.section?.class_id || enr?.section?.class?.id || classes[0]?.id || '';
+    setEditFormData({
+      full_name: student.full_name,
+      gender: student.gender,
+      date_of_birth: student.date_of_birth,
+      b_form_or_cnic: student.b_form_or_cnic || '',
+      guardian_name: student.guardian_name,
+      guardian_relation: student.guardian_relation || 'Father',
+      guardian_cnic: student.guardian_cnic || '',
+      guardian_phone: student.guardian_phone,
+      emergency_contact: student.emergency_contact || '',
+      address: student.address,
+      blood_group: student.blood_group || 'B+',
+      admission_date: student.admission_date,
+      photo_url: student.photo_url || '',
+      class_id: clsId,
+      section_id: enr?.section_id || sections.find((s) => s.class_id === clsId)?.id || '',
+    });
+    setEditError(null);
+    setEditSuccess(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent) return;
+    setEditError(null);
+    setEditSuccess(null);
+
+    if (!editFormData.full_name.trim() || !editFormData.guardian_name.trim() || !editFormData.guardian_phone.trim() || !editFormData.address.trim()) {
+      setEditError('Please fill out all required fields (Name, Guardian Name, Guardian Phone, Address).');
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    try {
+      await studentApi.updateStudentWithEnrollment(
+        selectedStudent.id,
+        {
+          full_name: editFormData.full_name.trim(),
+          gender: editFormData.gender,
+          date_of_birth: editFormData.date_of_birth,
+          b_form_or_cnic: editFormData.b_form_or_cnic.trim(),
+          guardian_name: editFormData.guardian_name.trim(),
+          guardian_relation: editFormData.guardian_relation,
+          guardian_cnic: editFormData.guardian_cnic.trim(),
+          guardian_phone: editFormData.guardian_phone.trim(),
+          emergency_contact: editFormData.emergency_contact.trim(),
+          address: editFormData.address.trim(),
+          blood_group: editFormData.blood_group,
+          admission_date: editFormData.admission_date,
+          photo_url: editFormData.photo_url ? editFormData.photo_url.trim() : undefined,
+        },
+        editFormData.section_id,
+        selectedSessionId,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+
+      setEditSuccess(`Student record for "${editFormData.full_name}" updated successfully.`);
+      await loadData();
+      setTimeout(() => {
+        setIsEditModalOpen(false);
+        setEditSuccess(null);
+      }, 1000);
+    } catch (err: any) {
+      setEditError(err.message || 'Database error: Failed to update student profile.');
+    } finally {
+      setIsEditSubmitting(false);
+    }
   };
 
   const handleSaveStudent = async (e: React.FormEvent) => {
@@ -172,6 +275,7 @@ export const StudentsPage: React.FC = () => {
       await studentApi.archiveStudent(selectedStudent.id, archiveReason || 'Administrative archiving', {
         id: user?.id,
         name: user?.full_name,
+        role: user?.role,
       });
       setIsArchiveDialogOpen(false);
       setSelectedStudent(null);
@@ -183,7 +287,7 @@ export const StudentsPage: React.FC = () => {
 
   const handleRestore = async (student: Student) => {
     try {
-      await studentApi.restoreStudent(student.id, { id: user?.id, name: user?.full_name });
+      await studentApi.restoreStudent(student.id, { id: user?.id, name: user?.full_name, role: user?.role });
       await loadData();
     } catch (err: any) {
       alert(`Error: ${err.message}`);
@@ -345,6 +449,15 @@ export const StudentsPage: React.FC = () => {
             >
               <Eye className="w-4 h-4" />
             </button>
+            {isAdmin && (
+              <button
+                onClick={() => handleOpenEdit(row)}
+                className="p-1.5 text-slate-500 hover:text-navy-900 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="Edit Student Details"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={() => {
                 setSelectedStudent(row);
@@ -355,25 +468,27 @@ export const StudentsPage: React.FC = () => {
             >
               <CreditCard className="w-4 h-4" />
             </button>
-            {row.is_active ? (
-              <button
-                onClick={() => {
-                  setSelectedStudent(row);
-                  setIsArchiveDialogOpen(true);
-                }}
-                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                title="Archive Student Record"
-              >
-                <Archive className="w-4 h-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => handleRestore(row)}
-                className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                title="Restore Student Record"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
+            {isAdmin && (
+              row.is_active ? (
+                <button
+                  onClick={() => {
+                    setSelectedStudent(row);
+                    setIsArchiveDialogOpen(true);
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  title="Archive Student Record"
+                >
+                  <Archive className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleRestore(row)}
+                  className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                  title="Restore Student Record"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )
             )}
           </div>
         );
@@ -404,27 +519,40 @@ export const StudentsPage: React.FC = () => {
             {showArchived ? 'Hide Archived' : 'Show Archived'}
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Upload className="w-3.5 h-3.5" />}
-            onClick={() => setIsCsvImportModalOpen(true)}
-          >
-            Import CSV
-          </Button>
+          {isAdmin ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+                onClick={() => setIsCsvImportModalOpen(true)}
+              >
+                Import CSV
+              </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<FileDown className="w-3.5 h-3.5" />}
-            onClick={handleExportCSV}
-          >
-            Export CSV
-          </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<FileDown className="w-3.5 h-3.5" />}
+                onClick={handleExportCSV}
+              >
+                Export CSV
+              </Button>
 
-          <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
-            Admit New Student
-          </Button>
+              <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
+                Admit New Student
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<FileDown className="w-3.5 h-3.5" />}
+              onClick={handleExportCSV}
+            >
+              Export CSV
+            </Button>
+          )}
         </div>
       </div>
 
@@ -669,11 +797,203 @@ export const StudentsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
+              {isAdmin ? (
+                <Button
+                  variant="outline"
+                  leftIcon={<Pencil className="w-4 h-4" />}
+                  onClick={() => {
+                    setIsProfileModalOpen(false);
+                    if (selectedStudent) handleOpenEdit(selectedStudent);
+                  }}
+                >
+                  Edit Student
+                </Button>
+              ) : <div />}
               <Button onClick={() => setIsProfileModalOpen(false)}>Done</Button>
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal: Admin Edit Student */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title={selectedStudent ? `Edit Student: ${selectedStudent.full_name}` : 'Edit Student Details'}
+        description="Preserves admission number, past attendance, examinations, and fee records"
+        size="lg"
+      >
+        <form onSubmit={handleUpdateStudent} className="space-y-4">
+          {editError && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
+              {editError}
+            </div>
+          )}
+          {editSuccess && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+              {editSuccess}
+            </div>
+          )}
+
+          <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+            <div>
+              <span className="text-slate-500">Admission Number (Preserved):</span>{' '}
+              <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                {selectedStudent?.admission_no}
+              </span>
+            </div>
+            <Badge variant={selectedStudent?.is_active ? 'success' : 'danger'}>
+              {selectedStudent?.is_active ? 'Active' : 'Archived'}
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Student Full Name"
+              required
+              value={editFormData.full_name}
+              onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })}
+            />
+
+            <Select
+              label="Gender"
+              required
+              options={[
+                { value: 'Male', label: 'Male' },
+                { value: 'Female', label: 'Female' },
+                { value: 'Other', label: 'Other' },
+              ]}
+              value={editFormData.gender}
+              onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value as any })}
+            />
+
+            <Input
+              label="Date of Birth"
+              type="date"
+              required
+              value={editFormData.date_of_birth}
+              onChange={(e) => setEditFormData({ ...editFormData, date_of_birth: e.target.value })}
+            />
+
+            <Input
+              label="B-Form / CNIC"
+              placeholder="35201-xxxxxxx-x"
+              value={editFormData.b_form_or_cnic}
+              onChange={(e) => setEditFormData({ ...editFormData, b_form_or_cnic: e.target.value })}
+            />
+
+            <Input
+              label="Admission Date"
+              type="date"
+              required
+              value={editFormData.admission_date}
+              onChange={(e) => setEditFormData({ ...editFormData, admission_date: e.target.value })}
+            />
+
+            <Select
+              label="Blood Group"
+              options={[
+                { value: 'A+', label: 'A+' },
+                { value: 'A-', label: 'A-' },
+                { value: 'B+', label: 'B+' },
+                { value: 'B-', label: 'B-' },
+                { value: 'AB+', label: 'AB+' },
+                { value: 'AB-', label: 'AB-' },
+                { value: 'O+', label: 'O+' },
+                { value: 'O-', label: 'O-' },
+              ]}
+              value={editFormData.blood_group}
+              onChange={(e) => setEditFormData({ ...editFormData, blood_group: e.target.value })}
+            />
+
+            <Input
+              label="Father / Guardian Name"
+              required
+              value={editFormData.guardian_name}
+              onChange={(e) => setEditFormData({ ...editFormData, guardian_name: e.target.value })}
+            />
+
+            <Select
+              label="Guardian Relation"
+              options={[
+                { value: 'Father', label: 'Father' },
+                { value: 'Mother', label: 'Mother' },
+                { value: 'Uncle', label: 'Uncle' },
+                { value: 'Grandparent', label: 'Grandparent' },
+                { value: 'Legal Guardian', label: 'Legal Guardian' },
+              ]}
+              value={editFormData.guardian_relation}
+              onChange={(e) => setEditFormData({ ...editFormData, guardian_relation: e.target.value })}
+            />
+
+            <Input
+              label="Guardian CNIC"
+              placeholder="35201-xxxxxxx-x"
+              value={editFormData.guardian_cnic}
+              onChange={(e) => setEditFormData({ ...editFormData, guardian_cnic: e.target.value })}
+            />
+
+            <Input
+              label="Guardian Contact Number"
+              required
+              placeholder="+92 300 xxxxxxx"
+              value={editFormData.guardian_phone}
+              onChange={(e) => setEditFormData({ ...editFormData, guardian_phone: e.target.value })}
+            />
+
+            <Input
+              label="Emergency Contact"
+              placeholder="+92 321 xxxxxxx"
+              value={editFormData.emergency_contact}
+              onChange={(e) => setEditFormData({ ...editFormData, emergency_contact: e.target.value })}
+            />
+
+            <Input
+              label="Student Photo URL (Optional)"
+              placeholder="https://example.com/photo.jpg"
+              value={editFormData.photo_url}
+              onChange={(e) => setEditFormData({ ...editFormData, photo_url: e.target.value })}
+            />
+
+            <Select
+              label="Class"
+              required
+              options={classes.map((c) => ({ value: c.id, label: c.name }))}
+              value={editFormData.class_id}
+              onChange={(e) => {
+                const clsId = e.target.value;
+                const firstSec = sections.find((s) => s.class_id === clsId);
+                setEditFormData({ ...editFormData, class_id: clsId, section_id: firstSec?.id || '' });
+              }}
+            />
+
+            <Select
+              label="Section"
+              required
+              options={availableEditSections.map((s) => ({ value: s.id, label: `Section ${s.name}` }))}
+              value={editFormData.section_id}
+              onChange={(e) => setEditFormData({ ...editFormData, section_id: e.target.value })}
+            />
+          </div>
+
+          <Input
+            label="Residential Address"
+            required
+            placeholder="House #, Street, Town / City"
+            value={editFormData.address}
+            onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
+          />
+
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="outline" type="button" onClick={() => setIsEditModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={isEditSubmitting}>
+              Save Changes
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* 4. Modal: CSV Bulk Import */}

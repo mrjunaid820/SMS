@@ -31,6 +31,14 @@ const ProtectedLayout: React.FC = () => {
   return <AppLayout />;
 };
 
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { role } = useAuth();
+  if (role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+};
+
 export const App: React.FC = () => {
   return (
     <ThemeProvider>
@@ -46,19 +54,70 @@ export const App: React.FC = () => {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/students" element={<StudentsPage />} />
-                <Route path="/teachers" element={<TeachersPage />} />
-                <Route path="/academic-sessions" element={<AcademicSessionsPage />} />
+                
+                {/* Admin Only Protected Routes */}
+                <Route
+                  path="/teachers"
+                  element={
+                    <AdminRoute>
+                      <TeachersPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/academic-sessions"
+                  element={
+                    <AdminRoute>
+                      <AcademicSessionsPage />
+                    </AdminRoute>
+                  }
+                />
                 <Route path="/classes-sections" element={<ClassesSectionsPage />} />
                 <Route path="/subjects" element={<SubjectsPage />} />
-                <Route path="/teacher-assignments" element={<TeacherAssignmentsPage />} />
+                <Route
+                  path="/teacher-assignments"
+                  element={
+                    <AdminRoute>
+                      <TeacherAssignmentsPage />
+                    </AdminRoute>
+                  }
+                />
                 <Route path="/attendance" element={<AttendancePage />} />
-                <Route path="/fees-accounts" element={<FeesAccountsPage />} />
+                <Route
+                  path="/fees-accounts"
+                  element={
+                    <AdminRoute>
+                      <FeesAccountsPage />
+                    </AdminRoute>
+                  }
+                />
                 <Route path="/examinations" element={<ExaminationsPage />} />
                 <Route path="/results-report-cards" element={<ResultsPage />} />
                 <Route path="/reports-exports" element={<ReportsPage />} />
-                <Route path="/audit-logs" element={<AuditLogsPage />} />
-                <Route path="/school-settings" element={<SettingsPage />} />
-                <Route path="/users-roles" element={<UsersRolesPage />} />
+                <Route
+                  path="/audit-logs"
+                  element={
+                    <AdminRoute>
+                      <AuditLogsPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/school-settings"
+                  element={
+                    <AdminRoute>
+                      <SettingsPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/users-roles"
+                  element={
+                    <AdminRoute>
+                      <UsersRolesPage />
+                    </AdminRoute>
+                  }
+                />
               </Route>
 
               {/* Fallback */}
