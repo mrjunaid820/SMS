@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useSchool } from '@/context/SchoolContext';
-import { Menu, Sun, Moon, LogOut, Calendar, ShieldCheck, UserCheck } from 'lucide-react';
+import { Menu, Sun, Moon, LogOut, Calendar } from 'lucide-react';
 import { Button } from '@/components/common/Button';
 
 export interface HeaderProps {
@@ -10,7 +10,7 @@ export interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
-  const { user, role, logout, switchUserRole } = useAuth();
+  const { user, role, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { sessions, selectedSessionId, setSelectedSessionId } = useSchool();
 
@@ -44,34 +44,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
         </div>
       </div>
 
-      {/* Right: Role Switcher Demo, Theme Toggle, User Profile */}
+      {/* Right: Theme Toggle & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Role Switch Pill (Admin vs Teacher preview) */}
-        <div className="hidden lg:flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium">
-          <button
-            onClick={() => switchUserRole('admin')}
-            className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-              role === 'admin'
-                ? 'bg-white dark:bg-slate-700 text-navy-900 dark:text-white shadow-xs font-semibold'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
-            <span>Admin</span>
-          </button>
-          <button
-            onClick={() => switchUserRole('teacher')}
-            className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-              role === 'teacher'
-                ? 'bg-white dark:bg-slate-700 text-navy-900 dark:text-white shadow-xs font-semibold'
-                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Teacher</span>
-          </button>
-        </div>
-
         {/* Theme Toggle Button */}
         <button
           onClick={toggleTheme}

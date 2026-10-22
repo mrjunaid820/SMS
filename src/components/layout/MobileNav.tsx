@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { MAIN_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
@@ -49,6 +49,7 @@ export interface MobileNavProps {
 export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
   const { role } = useAuth();
   const { settings } = useSchool();
+  const location = useLocation();
 
   if (!isOpen) return null;
 
@@ -81,24 +82,38 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
 
         {/* Links */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {allowedNavItems.map((item) => (
-            <NavLink
-              key={item.id}
-              to={item.path}
-              onClick={onClose}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors',
-                  isActive
-                    ? 'bg-brand-600 text-white font-semibold'
-                    : 'text-slate-300 hover:bg-navy-900 hover:text-white'
-                )
-              }
-            >
-              {iconMap[item.iconName]}
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
+          {allowedNavItems.map((item) => {
+            const targetPath =
+              item.id === 'dashboard'
+                ? role === 'teacher'
+                  ? '/teacher-dashboard'
+                  : '/admin-dashboard'
+                : item.path;
+            const isDashboardActive =
+              item.id === 'dashboard' &&
+              (location.pathname === '/dashboard' ||
+                location.pathname === '/admin-dashboard' ||
+                location.pathname === '/teacher-dashboard');
+
+            return (
+              <NavLink
+                key={item.id}
+                to={targetPath}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors',
+                    isActive || isDashboardActive
+                      ? 'bg-brand-600 text-white font-semibold'
+                      : 'text-slate-300 hover:bg-navy-900 hover:text-white'
+                  )
+                }
+              >
+                {iconMap[item.iconName]}
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
         </div>
       </div>
     </div>

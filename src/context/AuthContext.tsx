@@ -8,9 +8,8 @@ interface AuthContextType {
   role: UserRole;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password?: string) => Promise<void>;
+  login: (email: string, password?: string) => Promise<Profile>;
   logout: () => Promise<void>;
-  switchUserRole: (newRole: UserRole, profileIndex?: number) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,12 +19,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('sms_current_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Verify against system profiles to enforce role integrity and prevent client-side elevation
+        const profiles: Profile[] = (() => {
+          try {
+            const sp = localStorage.getItem('sms_profiles');
+            if (sp) return JSON.parse(sp);
+          } catch {}
+          return INITIAL_PROFILES;
+        })();
+        const verified = profiles.find(
+          (p) => p.id === parsed.id || p.email.toLowerCase() === (parsed.email || '').toLowerCase()
+        );
+        if (verified && verified.is_active !== false) {
+          return verified;
+        }
       } catch (e) {
         // ignore
       }
     }
-    return INITIAL_PROFILES[0]; // Default to Administrator
+    return INITIAL_PROFILES[0]; // Default Administrator session for initial install
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -68,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const login = async (email: string, password?: string) => {
+  const login = async (email: string, password?: string): Promise<Profile> => {
     setIsLoading(true);
     try {
       const cleanEmail = email.trim();
@@ -97,7 +110,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           setUser(profile);
           localStorage.setItem('sms_current_user', JSON.stringify(profile));
+          return profile;
         }
+        throw new Error('Failed to retrieve authenticated user session.');
       } else {
         const profiles: Profile[] = (() => {
           try {
@@ -129,6 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setUser(matched);
         localStorage.setItem('sms_current_user', JSON.stringify(matched));
+        return matched;
       }
     } finally {
       setIsLoading(false);
@@ -143,13 +159,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('sms_current_user');
   };
 
-  const switchUserRole = (newRole: UserRole, profileIndex = 0) => {
-    const candidates = INITIAL_PROFILES.filter((p) => p.role === newRole);
-    const chosen = candidates[profileIndex % candidates.length] || INITIAL_PROFILES[0];
-    setUser(chosen);
-    localStorage.setItem('sms_current_user', JSON.stringify(chosen));
-  };
-
   const role: UserRole = user?.role || 'admin';
   const isAuthenticated = user !== null;
 
@@ -162,7 +171,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         login,
         logout,
-        switchUserRole,
       }}
     >
       {children}

@@ -26,8 +26,12 @@ export const LoginPage: React.FC = () => {
     }
 
     try {
-      await login(email.trim(), password);
-      navigate('/dashboard');
+      const authenticatedUser = await login(email.trim(), password);
+      if (authenticatedUser?.role === 'teacher') {
+        navigate('/teacher-dashboard');
+      } else {
+        navigate('/admin-dashboard');
+      }
     } catch (err: any) {
       setError(err.message || 'Invalid credentials');
     }

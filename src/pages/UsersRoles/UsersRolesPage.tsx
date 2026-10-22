@@ -28,7 +28,7 @@ export const UsersRolesPage: React.FC = () => {
   const isAdmin = user?.role === 'admin';
 
   if (!isAdmin) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/teacher-dashboard" replace />;
   }
 
   const [profiles, setProfiles] = useState<Profile[]>(() => {

@@ -34,9 +34,22 @@ const ProtectedLayout: React.FC = () => {
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { role } = useAuth();
   if (role !== 'admin') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/teacher-dashboard" replace />;
   }
   return <>{children}</>;
+};
+
+const TeacherRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { role } = useAuth();
+  if (role !== 'teacher') {
+    return <Navigate to="/admin-dashboard" replace />;
+  }
+  return <>{children}</>;
+};
+
+const DashboardRedirect: React.FC = () => {
+  const { role } = useAuth();
+  return <Navigate to={role === 'teacher' ? '/teacher-dashboard' : '/admin-dashboard'} replace />;
 };
 
 export const App: React.FC = () => {
@@ -51,8 +64,24 @@ export const App: React.FC = () => {
 
               {/* Protected 15 Application Routes */}
               <Route element={<ProtectedLayout />}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/" element={<DashboardRedirect />} />
+                <Route path="/dashboard" element={<DashboardRedirect />} />
+                <Route
+                  path="/admin-dashboard"
+                  element={
+                    <AdminRoute>
+                      <DashboardPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/teacher-dashboard"
+                  element={
+                    <TeacherRoute>
+                      <DashboardPage />
+                    </TeacherRoute>
+                  }
+                />
                 <Route path="/students" element={<StudentsPage />} />
                 
                 {/* Admin Only Protected Routes */}
@@ -121,7 +150,7 @@ export const App: React.FC = () => {
               </Route>
 
               {/* Fallback */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="*" element={<DashboardRedirect />} />
             </Routes>
           </BrowserRouter>
         </SchoolProvider>

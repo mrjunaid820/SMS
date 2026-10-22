@@ -110,7 +110,10 @@ export const settingsApi = {
     return getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
   },
 
-  updateSettings: async (settings: Partial<SchoolSettings>, actor?: { id?: string; name?: string }): Promise<SchoolSettings> => {
+  updateSettings: async (settings: Partial<SchoolSettings>, actor?: { id?: string; name?: string; role?: string }): Promise<SchoolSettings> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to update school settings.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('school_settings').update(settings).eq('id', settings.id!).select().single();
       if (error) throw error;
@@ -132,7 +135,10 @@ export const settingsApi = {
     return getStorage<AcademicSession[]>('sessions', INITIAL_SESSIONS);
   },
 
-  createSession: async (session: Omit<AcademicSession, 'id' | 'created_at'>, actor?: { id?: string; name?: string }): Promise<AcademicSession> => {
+  createSession: async (session: Omit<AcademicSession, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<AcademicSession> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to create academic sessions.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('academic_sessions').insert([session]).select().single();
       if (error) throw error;
@@ -167,7 +173,10 @@ export const academicStructureApi = {
     return getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
   },
 
-  createClass: async (cls: Omit<ClassLevel, 'id' | 'created_at'>): Promise<ClassLevel> => {
+  createClass: async (cls: Omit<ClassLevel, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<ClassLevel> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to manage classes.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('classes').insert([cls]).select().single();
       if (error) throw error;
@@ -192,7 +201,10 @@ export const academicStructureApi = {
     }));
   },
 
-  createSection: async (section: Omit<Section, 'id' | 'created_at'>): Promise<Section> => {
+  createSection: async (section: Omit<Section, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Section> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to manage sections.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('sections').insert([section]).select('*, class:classes(*)').single();
       if (error) throw error;
@@ -217,7 +229,10 @@ export const academicStructureApi = {
     }));
   },
 
-  createSubject: async (subj: Omit<Subject, 'id' | 'created_at'>): Promise<Subject> => {
+  createSubject: async (subj: Omit<Subject, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Subject> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to manage subjects.');
+    }
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('subjects').insert([subj]).select('*, class:classes(*)').single();
       if (error) throw error;
@@ -999,7 +1014,10 @@ export const feeApi = {
       }));
   },
 
-  createStructure: async (structure: Omit<FeeStructure, 'id' | 'created_at'>): Promise<FeeStructure> => {
+  createStructure: async (structure: Omit<FeeStructure, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<FeeStructure> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to configure fee structures.');
+    }
     const structures = getStorage<FeeStructure[]>('fee_structures', INITIAL_FEE_STRUCTURES);
     const newStr: FeeStructure = { ...structure, id: generateUUID(), created_at: new Date().toISOString() };
     setStorage('fee_structures', [...structures, newStr]);
@@ -1029,8 +1047,11 @@ export const feeApi = {
     sessionId: string,
     billingMonth: string,
     dueDate: string,
-    actor?: { id?: string; name?: string }
+    actor?: { id?: string; name?: string; role?: string }
   ): Promise<{ generatedCount: number }> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to generate fee invoices.');
+    }
     const enrollments = await studentApi.getEnrollments(sessionId);
     const structures = await feeApi.getStructures(sessionId);
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
@@ -1087,8 +1108,11 @@ export const feeApi = {
     paymentMethod: PaymentMethod,
     referenceNo?: string,
     idempotencyKey?: string,
-    actor?: { id?: string; name?: string }
+    actor?: { id?: string; name?: string; role?: string }
   ): Promise<FeePayment> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to record fee payments.');
+    }
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
     const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
 
@@ -1143,8 +1167,11 @@ export const feeApi = {
   reversePayment: async (
     paymentId: string,
     reason: string,
-    actor?: { id?: string; name?: string }
+    actor?: { id?: string; name?: string; role?: string }
   ): Promise<void> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to reverse fee payments.');
+    }
     const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
 

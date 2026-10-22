@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { MAIN_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
@@ -58,6 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
     return true;
   });
 
+  const location = useLocation();
+
   return (
     <aside
       className={cn(
@@ -96,25 +98,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
 
       {/* Navigation Links */}
       <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
-        {allowedNavItems.map((item) => (
-          <NavLink
-            key={item.id}
-            to={item.path}
-            title={isCollapsed ? item.label : undefined}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all group',
-                isActive
-                  ? 'bg-brand-600 text-white shadow-xs font-semibold'
-                  : 'text-slate-300 hover:bg-navy-900 hover:text-white',
-                isCollapsed && 'justify-center px-0'
-              )
-            }
-          >
-            {iconMap[item.iconName]}
-            {!isCollapsed && <span className="truncate">{item.label}</span>}
-          </NavLink>
-        ))}
+        {allowedNavItems.map((item) => {
+          const targetPath =
+            item.id === 'dashboard'
+              ? role === 'teacher'
+                ? '/teacher-dashboard'
+                : '/admin-dashboard'
+              : item.path;
+          const isDashboardActive =
+            item.id === 'dashboard' &&
+            (location.pathname === '/dashboard' ||
+              location.pathname === '/admin-dashboard' ||
+              location.pathname === '/teacher-dashboard');
+
+          return (
+            <NavLink
+              key={item.id}
+              to={targetPath}
+              title={isCollapsed ? item.label : undefined}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all group',
+                  isActive || isDashboardActive
+                    ? 'bg-brand-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-300 hover:bg-navy-900 hover:text-white',
+                  isCollapsed && 'justify-center px-0'
+                )
+              }
+            >
+              {iconMap[item.iconName]}
+              {!isCollapsed && <span className="truncate">{item.label}</span>}
+            </NavLink>
+          );
+        })}
       </div>
 
       {/* Role Indicator Footer */}
