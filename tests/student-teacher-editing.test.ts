@@ -187,58 +187,132 @@ describe('Admin Student & Teacher Editing, Password Restrictions, and Scoping', 
   });
 
   // -------------------------------------------------------------
-  // REQUIREMENT 3: Password Restrictions for Teachers
+  // REQUIREMENT 3: Teacher Login Information & Credentials Editing
   // -------------------------------------------------------------
-  describe('Teacher Password Restrictions & Admin Password Management', () => {
-    it('allows administrator to reset teacher password with a temporary password and records audit log', async () => {
-      const teacherProfile = INITIAL_PROFILES[1]; // tariq.math@islamiapublic.edu.pk
+  describe('Teacher Login Information & Credentials Editing', () => {
+    it('allows administrator to update teacher login email and preserves auth UUID', async () => {
+      const teacher = INITIAL_TEACHERS[0]; // Muhammad Tariq
+      const originalProfileId = teacher.profile_id;
+      const newLoginEmail = 'tariq.senior@islamiapublic.edu.pk';
 
-      const result = await userApi.adminResetTeacherPassword(
-        teacherProfile.id,
-        'IPS-TempPass99!',
+      const result = await teacherApi.updateTeacherLoginEmail(
+        teacher.id,
+        newLoginEmail,
         { id: 'admin-1', name: 'Principal', role: 'admin' }
       );
 
       expect(result.success).toBe(true);
-      expect(result.message).toContain('Temporary password successfully assigned');
-      expect(result.message).toContain('Active sessions revoked');
+      expect(result.message).toContain(newLoginEmail);
+
+      // Verify teacher record email was updated and profile_id preserved
+      const teachers = await teacherApi.getTeachers();
+      const updatedTeacher = teachers.find((t) => t.id === teacher.id);
+      expect(updatedTeacher?.email).toBe(newLoginEmail);
+      expect(updatedTeacher?.profile_id).toBe(originalProfileId);
+
+      // Verify linked profile email was updated
+      const profiles = await userApi.getProfiles();
+      const linkedProfile = profiles.find((p) => p.id === originalProfileId);
+      expect(linkedProfile?.email).toBe(newLoginEmail);
     });
 
-    it('allows administrator to dispatch an authorized reset token to teacher email', async () => {
-      const teacherProfile = INITIAL_PROFILES[1];
-
-      const result = await userApi.adminResetTeacherPassword(
-        teacherProfile.id,
-        undefined,
-        { id: 'admin-1', name: 'Principal', role: 'admin' }
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.message).toContain(`Authorized password reset link dispatched to ${teacherProfile.email}`);
-    });
-
-    it('rejects password reset when actor is not an administrator', async () => {
-      const teacherProfile = INITIAL_PROFILES[1];
+    it('blocks duplicate email addresses when updating teacher login email', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+      const existingOtherEmail = INITIAL_TEACHERS[1].email!; // ayesha.eng@islamiapublic.edu.pk
 
       await expect(
-        userApi.adminResetTeacherPassword(
-          teacherProfile.id,
-          'IPS-NewPass123',
-          { id: 'teacher-1', name: 'Tariq', role: 'teacher' }
-        )
-      ).rejects.toThrow('Unauthorized: Only administrators are authorized to reset or modify staff credentials.');
-    });
-
-    it('validates temporary password minimum length', async () => {
-      const teacherProfile = INITIAL_PROFILES[1];
-
-      await expect(
-        userApi.adminResetTeacherPassword(
-          teacherProfile.id,
-          '123',
+        teacherApi.updateTeacherLoginEmail(
+          teacher.id,
+          existingOtherEmail,
           { id: 'admin-1', name: 'Principal', role: 'admin' }
         )
-      ).rejects.toThrow('Validation Error: Temporary password must be at least 6 characters.');
+      ).rejects.toThrow(`Validation Error: The email address "${existingOtherEmail}" is already registered to another user account.`);
+    });
+
+    it('rejects invalid email formats', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+
+      await expect(
+        teacherApi.updateTeacherLoginEmail(
+          teacher.id,
+          'invalid-email-address',
+          { id: 'admin-1', name: 'Principal', role: 'admin' }
+        )
+      ).rejects.toThrow('Validation Error: A valid email address is required.');
+    });
+
+    it('rejects login email updates when actor is not an administrator', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+
+      await expect(
+        teacherApi.updateTeacherLoginEmail(
+          teacher.id,
+          'hacked@school.edu.pk',
+          { id: 'teacher-1', name: 'Tariq', role: 'teacher' }
+        )
+      ).rejects.toThrow('Unauthorized: Only administrators are authorized to update teacher login information.');
+    });
+
+    it('allows administrator to assign a temporary password and records audit log', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+
+      const res = await teacherApi.resetTeacherPassword(
+        teacher.id,
+        { temporaryPassword: 'IPS-FacultyTemp2026!' },
+        { id: 'admin-1', name: 'Principal', role: 'admin' }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.message).toContain('Temporary password successfully assigned');
+      expect(res.message).toContain('Active sessions revoked');
+
+      // Verify credentials map has stored temporary password for newly configured credentials login
+      const creds = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+      expect(creds[(teacher.email || '').toLowerCase()]).toBe('IPS-FacultyTemp2026!');
+    });
+
+    it('allows administrator to dispatch an authorized reset link to teacher email', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+
+      const res = await teacherApi.resetTeacherPassword(
+        teacher.id,
+        { sendResetLink: true },
+        { id: 'admin-1', name: 'Principal', role: 'admin' }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.message).toContain(`Authorized password reset link dispatched to ${teacher.email}`);
+    });
+
+    it('rejects teacher password reset when actor is not an administrator', async () => {
+      const teacher = INITIAL_TEACHERS[0];
+
+      await expect(
+        teacherApi.resetTeacherPassword(
+          teacher.id,
+          { temporaryPassword: 'NewPassword123' },
+          { id: 'teacher-1', name: 'Tariq', role: 'teacher' }
+        )
+      ).rejects.toThrow('Unauthorized: Only administrators are authorized to reset teacher passwords.');
+    });
+
+    it('ensures legacy teacher without profile_id is automatically provisioned and linked', async () => {
+      // Find a teacher without profile_id (e.g. Dr. Imran Qureshi)
+      const legacyTeacher = INITIAL_TEACHERS.find((t) => !t.profile_id) || INITIAL_TEACHERS[2];
+
+      const profile = await teacherApi.ensureTeacherProfile(legacyTeacher.id, {
+        id: 'admin-1',
+        name: 'Principal',
+        role: 'admin',
+      });
+
+      expect(profile).toBeDefined();
+      expect(profile.id).toBeDefined();
+      expect(profile.role).toBe('teacher');
+
+      const teachers = await teacherApi.getTeachers();
+      const updatedLegacyTeacher = teachers.find((t) => t.id === legacyTeacher.id);
+      expect(updatedLegacyTeacher?.profile_id).toBe(profile.id);
     });
   });
 

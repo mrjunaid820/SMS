@@ -8,7 +8,7 @@ interface AuthContextType {
   role: UserRole;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, role?: UserRole) => Promise<void>;
+  login: (email: string, password?: string) => Promise<void>;
   logout: () => Promise<void>;
   switchUserRole: (newRole: UserRole, profileIndex?: number) => void;
 }
@@ -59,8 +59,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(data);
             localStorage.setItem('sms_current_user', JSON.stringify(data));
           }
-        } else {
-          // If in live mode and logged out, clear
         }
       });
 
@@ -70,13 +68,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const login = async (email: string, role: UserRole = 'admin') => {
+  const login = async (email: string, password?: string) => {
     setIsLoading(true);
     try {
+      const cleanEmail = email.trim();
+      if (!cleanEmail) {
+        throw new Error('Please enter your email address.');
+      }
+
       if (isLiveSupabaseConfigured()) {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password: 'password123',
+          email: cleanEmail,
+          password: password || '',
         });
         if (error) throw error;
         if (data?.user) {
@@ -104,18 +107,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return INITIAL_PROFILES;
         })();
 
-        const matched = profiles.find((p) => p.email.toLowerCase() === email.toLowerCase()) || {
-          id: role === 'admin' ? 'u0000000-0000-0000-0000-000000000001' : 'u0000000-0000-0000-0000-000000000002',
-          role,
-          full_name: role === 'admin' ? 'Administrator (Principal)' : 'Muhammad Tariq (Teacher)',
-          email,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+        const matched = profiles.find((p) => p.email.toLowerCase() === cleanEmail.toLowerCase());
+        if (!matched) {
+          throw new Error('Invalid credentials: No account found with this email address.');
+        }
 
         if (matched.is_active === false) {
           throw new Error('Your account has been deactivated. Please contact the school administrator.');
+        }
+
+        // Verify password if temporary password was set
+        try {
+          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+          const requiredPass = passMap[matched.id] || passMap[matched.email.toLowerCase()];
+          if (requiredPass && password && password !== requiredPass) {
+            throw new Error('Invalid password: The password entered does not match.');
+          }
+        } catch (e: any) {
+          if (e.message.startsWith('Invalid password')) throw e;
         }
 
         setUser(matched);
@@ -142,13 +151,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const role: UserRole = user?.role || 'admin';
+  const isAuthenticated = user !== null;
 
   return (
     <AuthContext.Provider
       value={{
         user,
         role,
-        isAuthenticated: !!user,
+        isAuthenticated,
         isLoading,
         login,
         logout,
@@ -161,7 +171,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };

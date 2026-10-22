@@ -4,35 +4,32 @@ import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
 import { Button } from '@/components/common/Button';
 import { Input } from '@/components/common/Input';
-import { Shield, Lock, Mail, CheckCircle2 } from 'lucide-react';
+import { Shield, Lock, Mail, Eye, EyeOff } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, isLoading } = useAuth();
   const { settings } = useSchool();
 
-  const [email, setEmail] = useState('admin@islamiapublic.edu.pk');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!email.trim() || !password) {
+      setError('Please enter both your email address and password.');
+      return;
+    }
+
     try {
-      await login(email, email.includes('admin') ? 'admin' : 'teacher');
+      await login(email.trim(), password);
       navigate('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Invalid credentials');
-    }
-  };
-
-  const handleQuickDemoLogin = async (demoEmail: string, demoRole: 'admin' | 'teacher') => {
-    setEmail(demoEmail);
-    try {
-      await login(demoEmail, demoRole);
-      navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.message);
     }
   };
 
@@ -57,7 +54,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
+          <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
             {error}
           </div>
         )}
@@ -67,6 +64,7 @@ export const LoginPage: React.FC = () => {
             label="Staff Email Address"
             type="email"
             required
+            placeholder="e.g. staff@islamiapublic.edu.pk"
             leftIcon={<Mail className="w-4 h-4" />}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -74,9 +72,21 @@ export const LoginPage: React.FC = () => {
 
           <Input
             label="Password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             required
+            placeholder="Enter your password"
             leftIcon={<Lock className="w-4 h-4" />}
+            rightIcon={
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none p-1 rounded"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            }
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -85,36 +95,6 @@ export const LoginPage: React.FC = () => {
             Sign In to ERP Portal
           </Button>
         </form>
-
-        {/* Quick Demo Credentials */}
-        <div className="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-center mb-3">
-            One-Click Evaluator Sign-In
-          </p>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickDemoLogin('admin@islamiapublic.edu.pk', 'admin')
-              }
-              className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 hover:border-brand-500 text-left transition-colors"
-            >
-              <div className="font-bold text-slate-900 dark:text-slate-100">Administrator</div>
-              <div className="text-[10px] text-slate-400">Full Access</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickDemoLogin('tariq.math@islamiapublic.edu.pk', 'teacher')
-              }
-              className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 hover:border-brand-500 text-left transition-colors"
-            >
-              <div className="font-bold text-slate-900 dark:text-slate-100">Teacher Account</div>
-              <div className="text-[10px] text-slate-400">Scoped to Class 9</div>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

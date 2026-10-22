@@ -6,10 +6,11 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   error?: string;
   helperText?: string;
   leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, helperText, leftIcon, id, ...props }, ref) => {
+  ({ className, label, error, helperText, leftIcon, rightIcon, id, ...props }, ref) => {
     const inputId = id || props.name || Math.random().toString(36).substring(2, 9);
 
     return (
@@ -33,6 +34,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               'block w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 transition-colors placeholder:text-slate-400',
               'focus:outline-none focus:ring-2 focus:ring-navy-900 focus:border-navy-900 dark:bg-slate-900 dark:text-slate-100 dark:border-slate-700 dark:focus:ring-brand-500',
               leftIcon && 'pl-10',
+              rightIcon && 'pr-10',
               error
                 ? 'border-rose-400 text-rose-900 focus:border-rose-500 focus:ring-rose-500 dark:border-rose-600'
                 : 'border-slate-300',
@@ -41,6 +43,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             )}
             {...props}
           />
+          {rightIcon && (
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+              {rightIcon}
+            </div>
+          )}
         </div>
         {error && <p className="text-xs text-rose-600 dark:text-rose-400 mt-1">{error}</p>}
         {!error && helperText && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{helperText}</p>}

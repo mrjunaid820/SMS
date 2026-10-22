@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Teacher, TeacherAssignment, ClassLevel, Section, Subject } from '@/types/database';
+import { Teacher, TeacherAssignment, ClassLevel, Section, Subject, Profile } from '@/types/database';
 import { teacherApi, academicStructureApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
@@ -21,6 +21,8 @@ import {
   Trash2,
   Plus,
   ShieldAlert,
+  KeyRound,
+  Lock,
 } from 'lucide-react';
 
 export const TeachersPage: React.FC = () => {
@@ -39,6 +41,8 @@ export const TeachersPage: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isManageLoginModalOpen, setIsManageLoginModalOpen] = useState(false);
+
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
 
   // Form State for Add
@@ -52,12 +56,11 @@ export const TeachersPage: React.FC = () => {
     designation: 'Senior Subject Master',
   });
 
-  // Form State for Admin Editing
+  // Form State for Admin Editing (Profile details only)
   const [editFormData, setEditFormData] = useState({
     employee_id: '',
     full_name: '',
     phone: '',
-    email: '',
     qualification: '',
     joining_date: '',
     designation: '',
@@ -72,6 +75,16 @@ export const TeachersPage: React.FC = () => {
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
+
+  // State for Manage Login Modal
+  const [loginTeacher, setLoginTeacher] = useState<Teacher | null>(null);
+  const [loginTeacherProfile, setLoginTeacherProfile] = useState<Profile | null>(null);
+  const [newLoginEmail, setNewLoginEmail] = useState('');
+  const [loginPasswordMethod, setLoginPasswordMethod] = useState<'temp' | 'link'>('temp');
+  const [newTemporaryPassword, setNewTemporaryPassword] = useState('');
+  const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -119,7 +132,6 @@ export const TeachersPage: React.FC = () => {
       employee_id: teacher.employee_id,
       full_name: teacher.full_name,
       phone: teacher.phone || '',
-      email: teacher.email || '',
       qualification: teacher.qualification,
       joining_date: teacher.joining_date,
       designation: teacher.designation,
@@ -140,6 +152,28 @@ export const TeachersPage: React.FC = () => {
     setEditError(null);
     setEditSuccess(null);
     setIsEditModalOpen(true);
+  };
+
+  const handleOpenManageLogin = async (teacher: Teacher) => {
+    setSelectedTeacher(teacher);
+    setLoginTeacher(teacher);
+    setNewLoginEmail(teacher.email || '');
+    setLoginPasswordMethod('temp');
+    setNewTemporaryPassword(`Tch-${Math.random().toString(36).slice(-6)}!`);
+    setLoginError(null);
+    setLoginSuccess(null);
+    setIsManageLoginModalOpen(true);
+
+    try {
+      const profile = await teacherApi.ensureTeacherProfile(teacher.id, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setLoginTeacherProfile(profile);
+    } catch (e: any) {
+      console.error('Failed to ensure teacher profile', e);
+    }
   };
 
   const handleAddAssignment = () => {
@@ -194,7 +228,7 @@ export const TeachersPage: React.FC = () => {
     }
   };
 
-  const handleUpdateTeacher = async (e: React.FormEvent) => {
+  const handleUpdateTeacherProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTeacher) return;
     setEditError(null);
@@ -213,7 +247,6 @@ export const TeachersPage: React.FC = () => {
           employee_id: editFormData.employee_id.trim(),
           full_name: editFormData.full_name.trim(),
           phone: editFormData.phone.trim(),
-          email: editFormData.email.trim(),
           qualification: editFormData.qualification.trim(),
           joining_date: editFormData.joining_date,
           designation: editFormData.designation.trim(),
@@ -234,6 +267,62 @@ export const TeachersPage: React.FC = () => {
       setEditError(err.message || 'Database error: Failed to update teacher profile.');
     } finally {
       setIsEditSubmitting(false);
+    }
+  };
+
+  const handleUpdateLoginEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginTeacher) return;
+    setLoginError(null);
+    setLoginSuccess(null);
+
+    if (!newLoginEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newLoginEmail.trim())) {
+      setLoginError('Validation Error: Please enter a valid email address.');
+      return;
+    }
+
+    setIsLoginSubmitting(true);
+    try {
+      const res = await teacherApi.updateTeacherLoginEmail(
+        loginTeacher.id,
+        newLoginEmail.trim(),
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setLoginSuccess(res.message);
+      await loadData();
+    } catch (err: any) {
+      setLoginError(err.message || 'Database error: Failed to update teacher login email.');
+    } finally {
+      setIsLoginSubmitting(false);
+    }
+  };
+
+  const handleResetTeacherPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginTeacher) return;
+    setLoginError(null);
+    setLoginSuccess(null);
+
+    if (loginPasswordMethod === 'temp' && (!newTemporaryPassword || newTemporaryPassword.length < 6)) {
+      setLoginError('Validation Error: Temporary password must be at least 6 characters.');
+      return;
+    }
+
+    setIsLoginSubmitting(true);
+    try {
+      const res = await teacherApi.resetTeacherPassword(
+        loginTeacher.id,
+        {
+          temporaryPassword: loginPasswordMethod === 'temp' ? newTemporaryPassword : undefined,
+          sendResetLink: loginPasswordMethod === 'link',
+        },
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setLoginSuccess(res.message);
+    } catch (err: any) {
+      setLoginError(err.message || 'Database error: Failed to process password reset.');
+    } finally {
+      setIsLoginSubmitting(false);
     }
   };
 
@@ -281,7 +370,7 @@ export const TeachersPage: React.FC = () => {
           </div>
           <div className="flex items-center gap-1 text-slate-500">
             <Mail className="w-3 h-3 text-slate-400" />
-            <span className="truncate max-w-[150px]">{row.email || '—'}</span>
+            <span className="truncate max-w-[150px] font-mono text-[11px]">{row.email || '—'}</span>
           </div>
         </div>
       ),
@@ -332,17 +421,26 @@ export const TeachersPage: React.FC = () => {
               setIsViewModalOpen(true);
             }}
             className="p-1.5 text-slate-500 hover:text-navy-900 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-            title="View Teaching Assignments"
+            title="View Teaching Allocations"
           >
             <BookOpen className="w-4 h-4" />
           </button>
           {isAdmin && (
             <button
               onClick={() => handleOpenEdit(row)}
-              className="p-1.5 text-slate-500 hover:text-navy-900 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Edit Teacher"
+              className="p-1.5 text-slate-500 hover:text-navy-900 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Edit Teacher Profile"
             >
               <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => handleOpenManageLogin(row)}
+              className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Manage Login & Password"
+            >
+              <KeyRound className="w-4 h-4" />
             </button>
           )}
           {isAdmin && (
@@ -372,7 +470,7 @@ export const TeachersPage: React.FC = () => {
             Teacher Faculty Management
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Profiles, employment records, qualifications and subject assignments
+            Profiles, employment records, qualifications, subject assignments and login credentials
           </p>
         </div>
 
@@ -476,7 +574,7 @@ export const TeachersPage: React.FC = () => {
       <Modal
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}
-        title={selectedTeacher ? `${selectedTeacher.full_name} — Assigned Classes` : 'Assignments'}
+        title={selectedTeacher ? `${selectedTeacher.full_name} — Faculty Details` : 'Faculty Details'}
         size="md"
       >
         <div className="space-y-3">
@@ -485,6 +583,17 @@ export const TeachersPage: React.FC = () => {
               <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs flex justify-between">
                 <span>Emp ID: <b>{selectedTeacher.employee_id}</b></span>
                 <span>Qualification: <b>{selectedTeacher.qualification}</b></span>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs space-y-1">
+                <div>
+                  <span className="text-slate-500">Contact Number:</span>{' '}
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{selectedTeacher.phone || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Official Login Email:</span>{' '}
+                  <span className="font-mono text-navy-900 dark:text-brand-400 font-semibold">{selectedTeacher.email || '—'}</span>
+                </div>
               </div>
 
               <div className="space-y-2 mt-2">
@@ -522,32 +631,48 @@ export const TeachersPage: React.FC = () => {
           )}
 
           <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-800">
-            {isAdmin ? (
-              <Button
-                variant="outline"
-                leftIcon={<Pencil className="w-4 h-4" />}
-                onClick={() => {
-                  setIsViewModalOpen(false);
-                  if (selectedTeacher) handleOpenEdit(selectedTeacher);
-                }}
-              >
-                Edit Teacher
-              </Button>
-            ) : <div />}
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Pencil className="w-3.5 h-3.5" />}
+                    onClick={() => {
+                      setIsViewModalOpen(false);
+                      if (selectedTeacher) handleOpenEdit(selectedTeacher);
+                    }}
+                  >
+                    Edit Profile
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<KeyRound className="w-3.5 h-3.5 text-amber-500" />}
+                    onClick={() => {
+                      setIsViewModalOpen(false);
+                      if (selectedTeacher) handleOpenManageLogin(selectedTeacher);
+                    }}
+                  >
+                    Manage Login
+                  </Button>
+                </>
+              )}
+            </div>
             <Button onClick={() => setIsViewModalOpen(false)}>Close</Button>
           </div>
         </div>
       </Modal>
 
-      {/* 3. Modal: Admin Edit Teacher Profile */}
+      {/* 3. Modal: Admin Edit Teacher Profile (Profile details only) */}
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
-        title={selectedTeacher ? `Edit Teacher: ${selectedTeacher.full_name}` : 'Edit Teacher Profile'}
-        description="Updates employee records, deactivation status, and subject allocations"
+        title={selectedTeacher ? `Edit Teacher Profile: ${selectedTeacher.full_name}` : 'Edit Teacher Profile'}
+        description="Updates employee records, status, and subject allocations. To modify login credentials, use 'Manage Login'."
         size="lg"
       >
-        <form onSubmit={handleUpdateTeacher} className="space-y-4">
+        <form onSubmit={handleUpdateTeacherProfile} className="space-y-4">
           {editError && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
               {editError}
@@ -558,6 +683,19 @@ export const TeachersPage: React.FC = () => {
               {editSuccess}
             </div>
           )}
+
+          {/* Read-Only Login Identity Banner distinguishing profile from auth credentials */}
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div>
+              <span className="text-slate-500">Official Login Identity:</span>{' '}
+              <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                {selectedTeacher?.email || 'Not configured'}
+              </span>
+            </div>
+            <span className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+              Credentials managed separately via "Manage Login"
+            </span>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
@@ -583,25 +721,18 @@ export const TeachersPage: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label="Phone Number"
+              label="Contact Phone Number"
               placeholder="+92 300 xxxxxxx"
               value={editFormData.phone}
               onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
             />
             <Input
-              label="Email Address"
-              type="email"
-              value={editFormData.email}
-              onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+              label="Academic Qualification & Degree"
+              required
+              value={editFormData.qualification}
+              onChange={(e) => setEditFormData({ ...editFormData, qualification: e.target.value })}
             />
           </div>
-
-          <Input
-            label="Academic Qualification & Degree"
-            required
-            value={editFormData.qualification}
-            onChange={(e) => setEditFormData({ ...editFormData, qualification: e.target.value })}
-          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
@@ -736,6 +867,164 @@ export const TeachersPage: React.FC = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* 4. Modal: Manage Teacher Login & Credentials */}
+      <Modal
+        isOpen={isManageLoginModalOpen}
+        onClose={() => setIsManageLoginModalOpen(false)}
+        title={loginTeacher ? `Manage Login: ${loginTeacher.full_name}` : 'Manage Teacher Login'}
+        description="Administrator-controlled login identity and credential management"
+        size="lg"
+      >
+        <div className="space-y-6">
+          {loginError && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
+              {loginError}
+            </div>
+          )}
+          {loginSuccess && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+              {loginSuccess}
+            </div>
+          )}
+
+          {/* Account Overview */}
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/70 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-slate-500">Teacher:</span>{' '}
+              <span className="font-bold text-slate-800 dark:text-slate-200">{loginTeacher?.full_name}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Employee ID:</span>{' '}
+              <span className="font-mono font-semibold text-navy-900 dark:text-brand-400">{loginTeacher?.employee_id}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Current Login Email:</span>{' '}
+              <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{loginTeacher?.email || 'None'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Linked Auth User UUID:</span>{' '}
+              <span className="font-mono text-[10px] text-slate-600 dark:text-slate-300">
+                {loginTeacherProfile?.id || loginTeacher?.profile_id || 'Generating...'}
+              </span>
+            </div>
+          </div>
+
+          {/* SECTION A: Update Login Email / Identity */}
+          <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2">
+              <Mail className="w-4 h-4 text-brand-600" />
+              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                1. Update Teacher Login Email / Identity
+              </h4>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Updates the authentication identity in Supabase Auth and synchronizes linked profile records while preserving the user UUID.
+            </p>
+
+            <form onSubmit={handleUpdateLoginEmail} className="space-y-3">
+              <Input
+                label="New Login Email Address"
+                type="email"
+                required
+                placeholder="teacher.new@islamiapublic.edu.pk"
+                value={newLoginEmail}
+                onChange={(e) => setNewLoginEmail(e.target.value)}
+              />
+
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
+                  Update Login Email
+                </Button>
+              </div>
+            </form>
+          </div>
+
+          {/* SECTION B: Administrator-Controlled Password Reset */}
+          <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-amber-600" />
+              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                2. Administrator-Controlled Password Reset
+              </h4>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Teachers cannot change their own passwords. As an Administrator, setting a temporary password revokes active sessions and allows the teacher to log in immediately with the new credentials.
+            </p>
+
+            <form onSubmit={handleResetTeacherPassword} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <label
+                  className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
+                    loginPasswordMethod === 'temp'
+                      ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <input
+                      type="radio"
+                      name="loginPasswordMethod"
+                      checked={loginPasswordMethod === 'temp'}
+                      onChange={() => setLoginPasswordMethod('temp')}
+                    />
+                    <span>Temporary Password</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Assign immediate password & revoke existing sessions
+                  </span>
+                </label>
+
+                <label
+                  className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
+                    loginPasswordMethod === 'link'
+                      ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <input
+                      type="radio"
+                      name="loginPasswordMethod"
+                      checked={loginPasswordMethod === 'link'}
+                      onChange={() => setLoginPasswordMethod('link')}
+                    />
+                    <span>Dispatch Reset Link</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Send secure one-time password reset link to teacher email
+                  </span>
+                </label>
+              </div>
+
+              {loginPasswordMethod === 'temp' && (
+                <Input
+                  label="Authorized Temporary Password"
+                  required
+                  placeholder="Minimum 6 characters"
+                  value={newTemporaryPassword}
+                  onChange={(e) => setNewTemporaryPassword(e.target.value)}
+                />
+              )}
+
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-[10px] text-slate-400 italic">
+                  * Password change will be recorded in audit log without storing plaintext password.
+                </span>
+                <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
+                  Confirm Password Reset
+                </Button>
+              </div>
+            </form>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="outline" onClick={() => setIsManageLoginModalOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

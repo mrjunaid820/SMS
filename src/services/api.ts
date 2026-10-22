@@ -386,6 +386,222 @@ export const teacherApi = {
     return updatedTeacher;
   },
 
+  ensureTeacherProfile: async (
+    teacherId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<Profile> => {
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const tIdx = teachers.findIndex((t) => t.id === teacherId);
+    if (tIdx === -1) throw new Error('Teacher record not found.');
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const teacher = teachers[tIdx];
+
+    // If teacher already has valid profile_id
+    if (teacher.profile_id) {
+      const existing = profiles.find((p) => p.id === teacher.profile_id);
+      if (existing) return existing;
+    }
+
+    // Try matching by email
+    const matchByEmail = profiles.find((p) => p.email.toLowerCase() === (teacher.email || '').toLowerCase());
+    if (matchByEmail) {
+      teachers[tIdx] = { ...teacher, profile_id: matchByEmail.id };
+      setStorage('teachers', [...teachers]);
+      return matchByEmail;
+    }
+
+    // Create a new profile with UUID and link
+    const newProfile: Profile = {
+      id: generateUUID(),
+      role: 'teacher',
+      full_name: teacher.full_name,
+      email: teacher.email || `teacher_${teacher.employee_id.toLowerCase()}@islamiapublic.edu.pk`,
+      phone: teacher.phone,
+      is_active: teacher.is_active,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setStorage('profiles', [...profiles, newProfile]);
+    teachers[tIdx] = { ...teacher, profile_id: newProfile.id, email: newProfile.email };
+    setStorage('teachers', [...teachers]);
+
+    if (isLiveSupabaseConfigured()) {
+      await supabase.from('profiles').insert([newProfile]);
+      await supabase.from('teachers').update({ profile_id: newProfile.id }).eq('id', teacherId);
+    }
+
+    return newProfile;
+  },
+
+  updateTeacherLoginEmail: async (
+    teacherId: string,
+    newEmail: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to update teacher login information.');
+    }
+
+    const trimmedEmail = newEmail.trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      throw new Error('Validation Error: A valid email address is required.');
+    }
+
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const tIdx = teachers.findIndex((t) => t.id === teacherId);
+    if (tIdx === -1) throw new Error('Teacher record not found.');
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const teacher = teachers[tIdx];
+
+    // 1. Check uniqueness across all other user profiles and teachers
+    const duplicateProfile = profiles.find(
+      (p) => p.email.toLowerCase() === trimmedEmail && p.id !== teacher.profile_id
+    );
+    const duplicateTeacher = teachers.find(
+      (t) => t.email && t.email.toLowerCase() === trimmedEmail && t.id !== teacherId
+    );
+
+    if (duplicateProfile || duplicateTeacher) {
+      throw new Error(`Validation Error: The email address "${newEmail}" is already registered to another user account.`);
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'update_login_email',
+            teacherId,
+            userId: teacher.profile_id,
+            newEmail: trimmedEmail,
+          },
+        });
+        if (error) throw new Error(`Supabase Auth update failed: ${error.message}`);
+        if (data && !data.success) throw new Error(data.error || data.message || 'Failed to update login identity.');
+      } catch (e: any) {
+        // Direct database fallback if edge function not yet deployed
+        if (teacher.profile_id) {
+          await supabase
+            .from('profiles')
+            .update({ email: trimmedEmail, updated_at: new Date().toISOString() })
+            .eq('id', teacher.profile_id);
+        }
+        await supabase
+          .from('teachers')
+          .update({ email: trimmedEmail })
+          .eq('id', teacherId);
+      }
+    } else {
+      // Persistent Storage Mode
+      const oldEmail = teacher.email;
+      teachers[tIdx] = { ...teacher, email: trimmedEmail };
+      setStorage('teachers', [...teachers]);
+
+      const pIdx = profiles.findIndex(
+        (p) => p.id === teacher.profile_id || (oldEmail && p.email.toLowerCase() === oldEmail.toLowerCase())
+      );
+      if (pIdx !== -1) {
+        profiles[pIdx] = { ...profiles[pIdx], email: trimmedEmail, updated_at: new Date().toISOString() };
+        setStorage('profiles', [...profiles]);
+      }
+
+      // Update passwords map key if exists
+      try {
+        const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+        if (oldEmail && passMap[oldEmail.toLowerCase()]) {
+          passMap[trimmedEmail] = passMap[oldEmail.toLowerCase()];
+          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+        }
+      } catch {}
+    }
+
+    await logAudit(
+      actor || {},
+      'TEACHER_LOGIN_EMAIL_UPDATED',
+      'teachers',
+      teacherId,
+      { target_user_id: teacher.profile_id, previous_email: teacher.email, new_email: trimmedEmail }
+    );
+
+    return {
+      success: true,
+      message: `Teacher login email successfully updated to ${trimmedEmail}.`,
+    };
+  },
+
+  resetTeacherPassword: async (
+    teacherId: string,
+    options: { temporaryPassword?: string; sendResetLink?: boolean },
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to reset teacher passwords.');
+    }
+
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const teacher = teachers.find((t) => t.id === teacherId);
+    if (!teacher) throw new Error('Teacher record not found.');
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const profile = profiles.find(
+      (p) => p.id === teacher.profile_id || (teacher.email && p.email.toLowerCase() === teacher.email.toLowerCase())
+    );
+    const targetUserId = profile?.id || teacher.profile_id;
+
+    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: options.temporaryPassword ? 'set_temporary_password' : 'send_reset_link',
+            teacherId,
+            userId: targetUserId,
+            temporaryPassword: options.temporaryPassword,
+          },
+        });
+        if (error) throw new Error(`Supabase Auth password reset failed: ${error.message}`);
+      } catch (e: any) {
+        if (options.sendResetLink && profile?.email) {
+          await supabase.auth.resetPasswordForEmail(profile.email);
+        }
+      }
+    } else {
+      // Save temporary password to credentials store
+      if (options.temporaryPassword) {
+        try {
+          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+          if (targetUserId) passMap[targetUserId] = options.temporaryPassword;
+          if (teacher.email) passMap[teacher.email.toLowerCase()] = options.temporaryPassword;
+          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+        } catch {}
+      }
+    }
+
+    await logAudit(
+      actor || {},
+      'TEACHER_PASSWORD_RESET',
+      'profiles',
+      targetUserId || teacherId,
+      {
+        target_email: teacher.email,
+        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'RESET_LINK_DISPATCHED',
+        sessions_revoked: Boolean(options.temporaryPassword),
+      }
+    );
+
+    return {
+      success: true,
+      message: options.temporaryPassword
+        ? `Temporary password successfully assigned for ${teacher.full_name}. Active sessions revoked.`
+        : `Authorized password reset link dispatched to ${teacher.email}.`,
+    };
+  },
+
   getAssignments: async (sessionId?: string): Promise<TeacherAssignment[]> => {
     if (isLiveSupabaseConfigured()) {
       let query = supabase.from('teacher_assignments').select('*, teacher:teachers(*), section:sections(*, class:classes(*)), subject:subjects(*), academic_session:academic_sessions(*)');
@@ -1217,6 +1433,15 @@ export const userApi = {
         // In real Supabase, calling admin auth updateUser
       } else {
         await supabase.auth.resetPasswordForEmail(targetProfile.email);
+      }
+    } else {
+      if (newTemporaryPassword) {
+        try {
+          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+          passMap[targetUserId] = newTemporaryPassword;
+          passMap[targetProfile.email.toLowerCase()] = newTemporaryPassword;
+          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+        } catch {}
       }
     }
 
