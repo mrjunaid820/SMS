@@ -22,6 +22,7 @@ import {
   Sliders,
   UserCog,
   Search,
+  CreditCard,
 } from 'lucide-react';
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -38,6 +39,7 @@ const iconMap: Record<string, React.ReactNode> = {
   FileSpreadsheet: <FileSpreadsheet className="w-4 h-4 shrink-0" />,
   Award: <Award className="w-4 h-4 shrink-0" />,
   FileDown: <FileDown className="w-4 h-4 shrink-0" />,
+  CreditCard: <CreditCard className="w-4 h-4 shrink-0" />,
   ShieldAlert: <ShieldAlert className="w-4 h-4 shrink-0" />,
   Sliders: <Sliders className="w-4 h-4 shrink-0" />,
   UserCog: <UserCog className="w-4 h-4 shrink-0" />,

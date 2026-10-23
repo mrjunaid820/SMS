@@ -31,6 +31,9 @@ import { StudentDashboardPage } from '@/pages/StudentPortal/StudentDashboardPage
 import { MyQuizMarksPage } from '@/pages/StudentPortal/MyQuizMarksPage';
 import { MyDailyDiaryPage } from '@/pages/StudentPortal/MyDailyDiaryPage';
 import { MyProfilePage } from '@/pages/StudentPortal/MyProfilePage';
+import { MyFeesPage } from '@/pages/StudentPortal/MyFeesPage';
+import { MyFeeChallansPage } from '@/pages/StudentPortal/MyFeeChallansPage';
+import { MyDuesPage } from '@/pages/StudentPortal/MyDuesPage';
 
 const ProtectedLayout: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -117,6 +120,30 @@ export const App: React.FC = () => {
                   element={
                     <StudentRoute>
                       <StudentDashboardPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-fees"
+                  element={
+                    <StudentRoute>
+                      <MyFeesPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-fee-challans"
+                  element={
+                    <StudentRoute>
+                      <MyFeeChallansPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-dues"
+                  element={
+                    <StudentRoute>
+                      <MyDuesPage />
                     </StudentRoute>
                   }
                 />

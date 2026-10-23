@@ -49,12 +49,15 @@ describe('Student Portal & Identity Architecture Verification', () => {
       expect(teacherItems.length).toBe(8);
     });
 
-    it('defines dedicated STUDENT_NAV_ITEMS with exactly 4 scoped portal items', () => {
+    it('defines dedicated STUDENT_NAV_ITEMS with scoped portal items', () => {
       expect(Array.isArray(STUDENT_NAV_ITEMS)).toBe(true);
-      expect(STUDENT_NAV_ITEMS.length).toBe(4);
+      expect(STUDENT_NAV_ITEMS.length).toBe(7);
 
       const paths = STUDENT_NAV_ITEMS.map((item) => item.path);
       expect(paths).toContain('/student-dashboard');
+      expect(paths).toContain('/my-fees');
+      expect(paths).toContain('/my-fee-challans');
+      expect(paths).toContain('/my-dues');
       expect(paths).toContain('/my-quiz-marks');
       expect(paths).toContain('/my-daily-diary');
       expect(paths).toContain('/my-profile');
@@ -306,6 +309,172 @@ describe('Student Portal & Identity Architecture Verification', () => {
       expect(selfData.student.id).toBe(targetStudent.id);
       expect(selfData.student.admission_no).toBe(targetStudent.admission_no);
       expect(selfData.enrollment).toBeDefined();
+    });
+  });
+
+  describe('7. Student Fee Management, Challans & Dues Verification', () => {
+    const adminActor = { id: 'admin-id-1', name: 'Principal Admin', role: 'admin' };
+
+    it('verifies migration 008 defines student fee RLS policies for invoices, items, and payments', () => {
+      const migrationPath = path.resolve(__dirname, '../supabase/migrations/008_student_fee_portal_rls.sql');
+      expect(fs.existsSync(migrationPath)).toBe(true);
+      const sql = fs.readFileSync(migrationPath, 'utf8');
+
+      expect(sql).toContain('Students can view own fee invoices');
+      expect(sql).toContain('Students can view own fee invoice items');
+      expect(sql).toContain('Students can view own fee payments');
+      expect(sql).toContain('idx_fee_invoices_enrollment_id');
+      expect(sql).toContain('idx_fee_payments_invoice_id');
+    });
+
+    it('retrieves student fee ledger, balances, and payment history correctly', async () => {
+      const students = await studentApi.getStudents();
+      const firstStudent = students[0];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        firstStudent.id,
+        'fee.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const feeData = await studentPortalApi.getMyFees(profile.id);
+      expect(feeData.student.id).toBe(firstStudent.id);
+      expect(feeData.invoices.length).toBeGreaterThan(0);
+      expect(feeData.summary.totalAssigned).toBeGreaterThan(0);
+      expect(feeData.summary.totalPaid).toBeGreaterThanOrEqual(0);
+      expect(feeData.summary.remainingBalance).toBe(
+        Math.max(0, feeData.summary.totalAssigned - feeData.summary.totalPaid)
+      );
+
+      // Verify invoice particulars breakdown is populated
+      const firstInv = feeData.invoices[0];
+      expect(firstInv.invoice_no).toBeDefined();
+      expect(firstInv.billing_month).toBeDefined();
+      expect(firstInv.items).toBeDefined();
+      expect(firstInv.items!.length).toBeGreaterThan(0);
+    });
+
+    it('enforces strict student-to-student fee isolation (Student A cannot see Student B fees)', async () => {
+      const students = await studentApi.getStudents();
+      const studentA = students[0];
+      const studentB = students[1];
+
+      const { profile: profileA } = await studentApi.provisionStudentAccount(
+        studentA.id,
+        'student.a@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+      const { profile: profileB } = await studentApi.provisionStudentAccount(
+        studentB.id,
+        'student.b@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const feesA = await studentPortalApi.getMyFees(profileA.id);
+      const feesB = await studentPortalApi.getMyFees(profileB.id);
+
+      // Verify invoice sets are completely disjoint
+      const invoiceIdsA = new Set(feesA.invoices.map((i) => i.id));
+      const invoiceIdsB = new Set(feesB.invoices.map((i) => i.id));
+
+      for (const idA of invoiceIdsA) {
+        expect(invoiceIdsB.has(idA)).toBe(false);
+      }
+
+      for (const idB of invoiceIdsB) {
+        expect(invoiceIdsA.has(idB)).toBe(false);
+      }
+    });
+
+    it('retrieves printable fee challans for student with student and class details', async () => {
+      const students = await studentApi.getStudents();
+      const student = students[0];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        student.id,
+        'challan.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const challans = await studentPortalApi.getMyFeeChallans(profile.id);
+      expect(challans.length).toBeGreaterThan(0);
+      const challan = challans[0];
+
+      expect(challan.invoice_no).toBeDefined();
+      expect(challan.due_date).toBeDefined();
+      expect(challan.net_amount).toBeGreaterThan(0);
+      expect(challan.enrollment?.student?.full_name).toBe(student.full_name);
+    });
+
+    it('accurately calculates outstanding dues, overdue flags, and late surcharges', async () => {
+      const students = await studentApi.getStudents();
+      // Student 2 has partially paid / overdue invoices in mock data
+      const student2 = students[1];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        student2.id,
+        'dues.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const dues = await studentPortalApi.getMyDues(profile.id);
+      expect(dues.student.id).toBe(student2.id);
+
+      if (dues.dueInvoices.length > 0) {
+        expect(dues.outstandingBase).toBeGreaterThan(0);
+        expect(dues.unpaidMonths.length).toBeGreaterThan(0);
+        expect(dues.totalPayableNow).toBe(dues.outstandingBase + dues.totalLateFines);
+
+        const firstDue = dues.dueInvoices[0];
+        expect(firstDue.remainingBalance).toBe(firstDue.net_amount - firstDue.paid_amount);
+        expect(firstDue.totalPayable).toBe(firstDue.remainingBalance + firstDue.lateFine);
+      }
+    });
+
+    it('reflects admin-recorded payments dynamically in student balances and dues', async () => {
+      const students = await studentApi.getStudents();
+      const student2 = students[1];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        student2.id,
+        'payment.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const initialFees = await studentPortalApi.getMyFees(profile.id);
+      const pendingInvoice = initialFees.invoices.find((i) => i.status !== 'Paid');
+      expect(pendingInvoice).toBeDefined();
+
+      const remainingBefore = Number(pendingInvoice!.net_amount) - Number(pendingInvoice!.paid_amount);
+      expect(remainingBefore).toBeGreaterThan(0);
+
+      const paymentAmount = Math.min(1000, remainingBefore);
+
+      // Admin records verified payment
+      await feeApi.recordPayment(
+        pendingInvoice!.id,
+        paymentAmount,
+        'Bank Transfer',
+        'TEST-SLIP-999',
+        undefined,
+        adminActor
+      );
+
+      // Re-query student fees
+      const updatedFees = await studentPortalApi.getMyFees(profile.id);
+      expect(updatedFees.summary.totalPaid).toBe(initialFees.summary.totalPaid + paymentAmount);
+      expect(updatedFees.summary.remainingBalance).toBe(initialFees.summary.remainingBalance - paymentAmount);
+
+      // Verify payment appears in verified payment transactions
+      const recorded = updatedFees.payments.find((p) => p.reference_no === 'TEST-SLIP-999');
+      expect(recorded).toBeDefined();
+      expect(recorded?.amount).toBe(paymentAmount);
     });
   });
 });

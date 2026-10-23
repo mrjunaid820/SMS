@@ -74,6 +74,9 @@ export const MAIN_NAV_ITEMS: NavItemConfig[] = [
 
 export const STUDENT_NAV_ITEMS: NavItemConfig[] = [
   { id: 'student-dashboard', label: 'My Dashboard', path: '/student-dashboard', iconName: 'LayoutDashboard', category: 'core' },
+  { id: 'my-fees', label: 'My Fees', path: '/my-fees', iconName: 'Receipt', category: 'finance' },
+  { id: 'my-fee-challans', label: 'Fee Challans', path: '/my-fee-challans', iconName: 'FileDown', category: 'finance' },
+  { id: 'my-dues', label: 'My Dues', path: '/my-dues', iconName: 'CreditCard', category: 'finance' },
   { id: 'my-quiz-marks', label: 'My Quiz Marks', path: '/my-quiz-marks', iconName: 'BookOpen', category: 'academic' },
   { id: 'my-daily-diary', label: 'My Daily Diary', path: '/my-daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
   { id: 'my-profile', label: 'My Profile', path: '/my-profile', iconName: 'UserCheck', category: 'core' },

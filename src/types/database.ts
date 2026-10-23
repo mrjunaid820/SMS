@@ -277,6 +277,8 @@ export interface SchoolSettings {
   principal_name?: string;
   logo_url?: string;
   currency_symbol: string;
+  bank_name?: string;
+  bank_account_no?: string;
   current_session_id?: string;
   grading_rules: GradeRule[];
   created_at: string;

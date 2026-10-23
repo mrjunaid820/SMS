@@ -13,6 +13,7 @@ import {
   AttendanceStatus,
   FeeStructure,
   FeeInvoice,
+  InvoiceStatus,
   FeePayment,
   FeePaymentReversal,
   PaymentMethod,
@@ -2786,6 +2787,243 @@ export const studentPortalApi = {
       },
       { role: 'student' }
     );
+  },
+
+  getMyFees: async (
+    profileId: string
+  ): Promise<{
+    student: Student;
+    enrollment?: Enrollment;
+    summary: {
+      totalAssigned: number;
+      totalPaid: number;
+      remainingBalance: number;
+      totalInvoices: number;
+      paidCount: number;
+      partialCount: number;
+      unpaidCount: number;
+      overdueCount: number;
+    };
+    invoices: FeeInvoice[];
+    payments: FeePayment[];
+  }> => {
+    const { student, enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    if (!enrollment) {
+      return {
+        student,
+        summary: {
+          totalAssigned: 0,
+          totalPaid: 0,
+          remainingBalance: 0,
+          totalInvoices: 0,
+          paidCount: 0,
+          partialCount: 0,
+          unpaidCount: 0,
+          overdueCount: 0,
+        },
+        invoices: [],
+        payments: [],
+      };
+    }
+
+    const enrollments = await studentApi.getEnrollments();
+    const studentEnrollments = enrollments.filter((e) => e.student_id === student.id);
+    const enrollmentIds = new Set(studentEnrollments.map((e) => e.id));
+
+    let invoices: FeeInvoice[] = [];
+    let payments: FeePayment[] = [];
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: invData } = await supabase
+        .from('fee_invoices')
+        .select('*, items:fee_invoice_items(*), payments:fee_payments(*), enrollment:enrollments(*, student:students(*), section:sections(*, class:classes(*)))')
+        .in('enrollment_id', Array.from(enrollmentIds))
+        .order('billing_month', { ascending: false });
+      if (invData) invoices = invData;
+
+      const { data: payData } = await supabase
+        .from('fee_payments')
+        .select('*, invoice:fee_invoices(*)')
+        .in('invoice_id', invoices.map((i) => i.id))
+        .eq('is_reversed', false)
+        .order('payment_date', { ascending: false });
+      if (payData) payments = payData;
+    } else {
+      const allInvoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
+      const allPayments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
+
+      invoices = allInvoices
+        .filter((i) => enrollmentIds.has(i.enrollment_id))
+        .map((inv) => {
+          const invPayments = allPayments.filter((p) => p.invoice_id === inv.id && !p.is_reversed);
+          const currentEnrollment = studentEnrollments.find((e) => e.id === inv.enrollment_id) || enrollment;
+          return {
+            ...inv,
+            enrollment: currentEnrollment,
+            payments: invPayments,
+            items:
+              inv.items && inv.items.length > 0
+                ? inv.items
+                : [
+                    {
+                      id: `${inv.id}-item-1`,
+                      invoice_id: inv.id,
+                      description: `Monthly Tuition Fee (${inv.billing_month})`,
+                      amount: Number(inv.total_amount),
+                      created_at: inv.created_at,
+                    },
+                  ],
+          };
+        })
+        .sort((a, b) => b.billing_month.localeCompare(a.billing_month));
+
+      payments = allPayments
+        .filter((p) => invoices.some((i) => i.id === p.invoice_id) && !p.is_reversed)
+        .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Compute updated dynamic status and totals
+    let totalAssigned = 0;
+    let totalPaid = 0;
+    let paidCount = 0;
+    let partialCount = 0;
+    let unpaidCount = 0;
+    let overdueCount = 0;
+
+    const normalizedInvoices = invoices.map((inv) => {
+      const net = Number(inv.net_amount);
+      const paid = Number(inv.paid_amount);
+      totalAssigned += net;
+      totalPaid += paid;
+
+      let effectiveStatus: InvoiceStatus = inv.status;
+      if (paid >= net) {
+        effectiveStatus = 'Paid';
+        paidCount++;
+      } else if (paid > 0) {
+        effectiveStatus = 'Partially Paid';
+        partialCount++;
+      } else if (inv.due_date < todayStr) {
+        effectiveStatus = 'Overdue';
+        overdueCount++;
+      } else {
+        effectiveStatus = 'Unpaid';
+        unpaidCount++;
+      }
+
+      return {
+        ...inv,
+        status: effectiveStatus,
+      };
+    });
+
+    const remainingBalance = Math.max(0, totalAssigned - totalPaid);
+
+    return {
+      student,
+      enrollment,
+      summary: {
+        totalAssigned,
+        totalPaid,
+        remainingBalance,
+        totalInvoices: normalizedInvoices.length,
+        paidCount,
+        partialCount,
+        unpaidCount,
+        overdueCount,
+      },
+      invoices: normalizedInvoices,
+      payments,
+    };
+  },
+
+  getMyFeeChallans: async (profileId: string): Promise<FeeInvoice[]> => {
+    const data = await studentPortalApi.getMyFees(profileId);
+    return data.invoices;
+  },
+
+  getMyDues: async (
+    profileId: string
+  ): Promise<{
+    student: Student;
+    enrollment?: Enrollment;
+    outstandingBase: number;
+    totalLateFines: number;
+    totalPayableNow: number;
+    unpaidMonths: string[];
+    overdueCount: number;
+    dueInvoices: (FeeInvoice & {
+      remainingBalance: number;
+      isOverdue: boolean;
+      lateFine: number;
+      totalPayable: number;
+    })[];
+    clearedInvoices: FeeInvoice[];
+    paymentHistory: FeePayment[];
+  }> => {
+    const { student, enrollment, invoices, payments } = await studentPortalApi.getMyFees(profileId);
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const dueInvoices: (FeeInvoice & {
+      remainingBalance: number;
+      isOverdue: boolean;
+      lateFine: number;
+      totalPayable: number;
+    })[] = [];
+
+    const clearedInvoices: FeeInvoice[] = [];
+    const unpaidMonthsSet = new Set<string>();
+
+    let outstandingBase = 0;
+    let totalLateFines = 0;
+    let overdueCount = 0;
+
+    invoices.forEach((inv) => {
+      const net = Number(inv.net_amount);
+      const paid = Number(inv.paid_amount);
+      const balance = Math.max(0, net - paid);
+
+      if (balance <= 0) {
+        clearedInvoices.push(inv);
+      } else {
+        const isOverdue = inv.due_date < todayStr;
+        // Standard Pakistani school late fee fine: Rs. 200 per overdue challan
+        const lateFine = isOverdue ? 200 : 0;
+        const totalPayable = balance + lateFine;
+
+        outstandingBase += balance;
+        totalLateFines += lateFine;
+        if (isOverdue) overdueCount++;
+
+        unpaidMonthsSet.add(inv.billing_month);
+
+        dueInvoices.push({
+          ...inv,
+          remainingBalance: balance,
+          isOverdue,
+          lateFine,
+          totalPayable,
+        });
+      }
+    });
+
+    const unpaidMonths = Array.from(unpaidMonthsSet).sort();
+    const totalPayableNow = outstandingBase + totalLateFines;
+
+    return {
+      student,
+      enrollment,
+      outstandingBase,
+      totalLateFines,
+      totalPayableNow,
+      unpaidMonths,
+      overdueCount,
+      dueInvoices,
+      clearedInvoices,
+      paymentHistory: payments,
+    };
   },
 };
 

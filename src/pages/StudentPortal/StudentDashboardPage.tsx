@@ -18,6 +18,9 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Receipt,
+  CreditCard,
+  FileDown,
 } from 'lucide-react';
 
 export const StudentDashboardPage: React.FC = () => {
@@ -296,7 +299,61 @@ export const StudentDashboardPage: React.FC = () => {
       </div>
 
       {/* Quick Action Navigation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div
+          onClick={() => navigate('/my-fees')}
+          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-navy-50 dark:bg-navy-950/60 text-navy-800 dark:text-navy-300 flex items-center justify-center">
+              <Receipt className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
+                My Fees Ledger
+              </h3>
+              <p className="text-[11px] text-slate-500">View payment history & balances</p>
+            </div>
+          </div>
+          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
+        </div>
+
+        <div
+          onClick={() => navigate('/my-fee-challans')}
+          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 flex items-center justify-center">
+              <FileDown className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
+                Download Challans
+              </h3>
+              <p className="text-[11px] text-slate-500">Print 3-part bank fee vouchers</p>
+            </div>
+          </div>
+          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
+        </div>
+
+        <div
+          onClick={() => navigate('/my-dues')}
+          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
+                My Payable Dues
+              </h3>
+              <p className="text-[11px] text-slate-500">Outstanding fees & instructions</p>
+            </div>
+          </div>
+          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
+        </div>
+
         <div
           onClick={() => navigate('/my-quiz-marks')}
           className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
@@ -309,43 +366,7 @@ export const StudentDashboardPage: React.FC = () => {
               <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
                 My Quiz Marks
               </h3>
-              <p className="text-[11px] text-slate-500">Filter by subject and view BISE grades</p>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
-        </div>
-
-        <div
-          onClick={() => navigate('/my-daily-diary')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
-              <ClipboardCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                My Daily Diary
-              </h3>
-              <p className="text-[11px] text-slate-500">Check class tasks and submission dates</p>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
-        </div>
-
-        <div
-          onClick={() => navigate('/my-profile')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
-              <UserCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                My Profile & Identity
-              </h3>
-              <p className="text-[11px] text-slate-500">View enrollment and change password</p>
+              <p className="text-[11px] text-slate-500">Filter by subject and view grades</p>
             </div>
           </div>
           <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
