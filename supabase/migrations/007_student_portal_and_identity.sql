@@ -13,7 +13,7 @@ BEGIN
 END $$;
 
 -- 2. LINK STUDENT RECORDS TO AUTHENTICATED USER PROFILES
--- Adds a nullable, unique profile_id foreign key to public.students
+-- Adds a nullable, unique profile_id foreign key and email column to public.students
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -24,6 +24,16 @@ BEGIN
     ) THEN
         ALTER TABLE public.students 
             ADD COLUMN profile_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE SET NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+          AND table_name = 'students' 
+          AND column_name = 'email'
+    ) THEN
+        ALTER TABLE public.students 
+            ADD COLUMN email VARCHAR(100);
     END IF;
 END $$;
 
