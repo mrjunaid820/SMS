@@ -23,6 +23,8 @@ import {
   AuditLog,
   Quiz,
   QuizMark,
+  DailyDiary,
+  DiaryStatus,
   StudentSearchResult,
   StudentAcademicSummary,
 } from '@/types/database';
@@ -47,6 +49,7 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_QUIZZES,
   INITIAL_QUIZ_MARKS,
+  INITIAL_DAILY_DIARIES,
 } from './mockData';
 import { generateUUID, calculateGrade, calculateAttendancePercentage } from '@/lib/utils';
 
@@ -1761,6 +1764,362 @@ export const quizApi = {
     setStorage('quiz_marks', updated);
     await logAudit(actor || {}, 'QUIZ_MARKS_ENTERED', 'quiz_marks', quizId, { count: marksData.length });
   },
+
+  updateQuiz: async (
+    quizId: string,
+    updates: Partial<Pick<Quiz, 'title' | 'assessment_date' | 'max_marks' | 'instructions'>>,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<Quiz> => {
+    const quiz = await quizApi.getQuizById(quizId);
+    if (!quiz) throw new Error('Quiz not found.');
+
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher profile record not found.');
+      }
+      const assignments = await teacherApi.getAssignments(quiz.academic_session_id);
+      const isAssigned = assignments.some(
+        (a) => a.teacher_id === currentTeacher.id && a.section_id === quiz.section_id && a.subject_id === quiz.subject_id
+      );
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You are not authorized to edit quizzes for this section or subject.');
+      }
+    }
+
+    if (updates.max_marks !== undefined && Number(updates.max_marks) <= 0) {
+      throw new Error('Validation Error: Maximum marks must be greater than zero.');
+    }
+    if (updates.title !== undefined && !updates.title.trim()) {
+      throw new Error('Validation Error: Quiz title cannot be empty.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('quizzes').update(updates).eq('id', quizId).select().single();
+      if (error) throw error;
+      await logAudit(actor || {}, 'QUIZ_UPDATED', 'quizzes', quizId, updates);
+      return data;
+    }
+
+    const quizzes = getStorage<Quiz[]>('quizzes', INITIAL_QUIZZES);
+    const idx = quizzes.findIndex((q) => q.id === quizId);
+    if (idx === -1) throw new Error('Quiz not found.');
+
+    const updatedQuiz: Quiz = {
+      ...quizzes[idx],
+      ...updates,
+      max_marks: updates.max_marks !== undefined ? Number(updates.max_marks) : quizzes[idx].max_marks,
+    };
+    quizzes[idx] = updatedQuiz;
+    setStorage('quizzes', quizzes);
+    await logAudit(actor || {}, 'QUIZ_UPDATED', 'quizzes', quizId, updates);
+    return updatedQuiz;
+  },
+
+  deleteQuiz: async (
+    quizId: string,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<void> => {
+    const quiz = await quizApi.getQuizById(quizId);
+    if (!quiz) throw new Error('Quiz not found.');
+
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher profile record not found.');
+      }
+      const assignments = await teacherApi.getAssignments(quiz.academic_session_id);
+      const isAssigned = assignments.some(
+        (a) => a.teacher_id === currentTeacher.id && a.section_id === quiz.section_id && a.subject_id === quiz.subject_id
+      );
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You are not authorized to delete quizzes for this section or subject.');
+      }
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { error } = await supabase.from('quizzes').delete().eq('id', quizId);
+      if (error) throw error;
+      await logAudit(actor || {}, 'QUIZ_DELETED', 'quizzes', quizId, { title: quiz.title });
+      return;
+    }
+
+    const quizzes = getStorage<Quiz[]>('quizzes', INITIAL_QUIZZES);
+    setStorage('quizzes', quizzes.filter((q) => q.id !== quizId));
+
+    const marks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
+    setStorage('quiz_marks', marks.filter((m) => m.quiz_id !== quizId));
+
+    await logAudit(actor || {}, 'QUIZ_DELETED', 'quizzes', quizId, { title: quiz.title });
+  },
+};
+
+// -------------------------------------------------------------
+// 12. SUBJECT-WISE DAILY DIARY
+// -------------------------------------------------------------
+export const diaryApi = {
+  getDiaries: async (
+    filters?: {
+      sessionId?: string;
+      classId?: string;
+      sectionId?: string;
+      subjectId?: string;
+      date?: string;
+      startDate?: string;
+      endDate?: string;
+      status?: DiaryStatus;
+    },
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<DailyDiary[]> => {
+    let diaries: DailyDiary[] = [];
+
+    if (isLiveSupabaseConfigured()) {
+      let q = supabase
+        .from('daily_diary')
+        .select('*, class:classes(*), section:sections(*), subject:subjects(*), teacher:teachers(*), academic_session:academic_sessions(*)')
+        .order('diary_date', { ascending: false });
+
+      if (filters?.sessionId) q = q.eq('academic_session_id', filters.sessionId);
+      if (filters?.classId) q = q.eq('class_id', filters.classId);
+      if (filters?.sectionId) q = q.eq('section_id', filters.sectionId);
+      if (filters?.subjectId) q = q.eq('subject_id', filters.subjectId);
+      if (filters?.date) q = q.eq('diary_date', filters.date);
+      if (filters?.startDate) q = q.gte('diary_date', filters.startDate);
+      if (filters?.endDate) q = q.lte('diary_date', filters.endDate);
+      if (filters?.status) q = q.eq('status', filters.status);
+
+      const { data, error } = await q;
+      if (!error && data) diaries = data;
+    } else {
+      const stored = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
+      const classes = await academicStructureApi.getClasses();
+      const sections = await academicStructureApi.getSections();
+      const subjects = await academicStructureApi.getSubjects();
+      const teachers = await teacherApi.getTeachers();
+      const sessions = await settingsApi.getSessions();
+
+      diaries = stored.map((d) => ({
+        ...d,
+        homework: d.homework || d.homework_details || '',
+        homework_details: d.homework_details || d.homework || '',
+        instructions: d.instructions || d.instructions_or_test_alerts || '',
+        instructions_or_test_alerts: d.instructions_or_test_alerts || d.instructions || '',
+        class: classes.find((c) => c.id === d.class_id),
+        section: sections.find((s) => s.id === d.section_id),
+        subject: subjects.find((s) => s.id === d.subject_id),
+        teacher: teachers.find((t) => t.id === d.teacher_id),
+        academic_session: sessions.find((ses) => ses.id === d.academic_session_id),
+      }));
+
+      if (filters?.sessionId) diaries = diaries.filter((d) => d.academic_session_id === filters.sessionId);
+      if (filters?.classId) diaries = diaries.filter((d) => d.class_id === filters.classId);
+      if (filters?.sectionId) diaries = diaries.filter((d) => d.section_id === filters.sectionId);
+      if (filters?.subjectId) diaries = diaries.filter((d) => d.subject_id === filters.subjectId);
+      if (filters?.date) diaries = diaries.filter((d) => d.diary_date === filters.date);
+      if (filters?.startDate) diaries = diaries.filter((d) => d.diary_date >= filters.startDate!);
+      if (filters?.endDate) diaries = diaries.filter((d) => d.diary_date <= filters.endDate!);
+      if (filters?.status) diaries = diaries.filter((d) => d.status === filters.status);
+
+      diaries.sort((a, b) => new Date(b.diary_date).getTime() - new Date(a.diary_date).getTime());
+    }
+
+    // Role-based visibility scoping
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) return [];
+
+      const assignments = await teacherApi.getAssignments(filters?.sessionId);
+      const teacherAssignments = assignments.filter((a) => a.teacher_id === currentTeacher.id);
+      const assignedSectionIds = new Set(teacherAssignments.map((a) => a.section_id));
+
+      return diaries.filter((d) => assignedSectionIds.has(d.section_id));
+    }
+
+    // Future student portal readiness: students only see published entries, private notes omitted
+    if (actor?.role === 'student') {
+      return diaries
+        .filter((d) => d.status === 'published')
+        .map((d) => {
+          const { private_teacher_notes, ...safeEntry } = d;
+          return safeEntry as DailyDiary;
+        });
+    }
+
+    return diaries;
+  },
+
+  getDiaryById: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<DailyDiary | null> => {
+    const list = await diaryApi.getDiaries(undefined, actor);
+    return list.find((d) => d.id === id) || null;
+  },
+
+  saveDiary: async (
+    diary: Partial<DailyDiary> & {
+      section_id: string;
+      subject_id: string;
+      diary_date: string;
+      lesson_topics: string;
+      status: DiaryStatus;
+    },
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<DailyDiary> => {
+    // 1. Teacher scoping check
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher account record not found.');
+      }
+
+      const assignments = await teacherApi.getAssignments(diary.academic_session_id);
+      const isAssigned = assignments.some(
+        (a) => a.teacher_id === currentTeacher.id && a.section_id === diary.section_id && a.subject_id === diary.subject_id
+      );
+
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You are not authorized to create or edit diary entries for unassigned classes or subjects.');
+      }
+    }
+
+    // 2. Validation
+    if (!diary.diary_date) throw new Error('Validation Error: Diary date is required.');
+    if (!diary.lesson_topics || !diary.lesson_topics.trim()) {
+      throw new Error('Validation Error: Lesson / topics covered is required.');
+    }
+    const hw = (diary.homework || diary.homework_details || '').trim();
+    if (!hw) {
+      throw new Error('Validation Error: Homework / assignment details is required.');
+    }
+    if (!diary.section_id) throw new Error('Validation Error: Section is required.');
+    if (!diary.subject_id) throw new Error('Validation Error: Subject is required.');
+
+    const sections = await academicStructureApi.getSections();
+    const sec = sections.find((s) => s.id === diary.section_id);
+    const classId = diary.class_id || sec?.class_id || '';
+    const inst = (diary.instructions_or_test_alerts || diary.instructions || '').trim();
+
+    const normalizedDiary: any = {
+      ...diary,
+      class_id: classId,
+      homework: hw,
+      homework_details: hw,
+      instructions: inst,
+      instructions_or_test_alerts: inst,
+    };
+
+    const now = new Date().toISOString();
+
+    if (diary.id) {
+      if (isLiveSupabaseConfigured()) {
+        const payload = { ...normalizedDiary, updated_at: now };
+        const { data, error } = await supabase.from('daily_diary').update(payload).eq('id', diary.id).select().single();
+        if (error) throw error;
+        await logAudit(actor || {}, 'DIARY_UPDATED', 'daily_diary', diary.id, { date: diary.diary_date, status: diary.status });
+        return data;
+      }
+
+      const diaries = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
+      const idx = diaries.findIndex((d) => d.id === diary.id);
+      if (idx === -1) throw new Error('Diary entry not found.');
+
+      const updated: DailyDiary = {
+        ...diaries[idx],
+        ...normalizedDiary,
+        id: diary.id,
+        updated_at: now,
+      };
+      diaries[idx] = updated;
+      setStorage('daily_diaries', diaries);
+      await logAudit(actor || {}, 'DIARY_UPDATED', 'daily_diary', diary.id, { date: diary.diary_date, status: diary.status });
+      return updated;
+    }
+
+    // Check duplicate entry for same section, subject, date, session
+    const existingList = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
+    const duplicate = existingList.find(
+      (d) =>
+        d.section_id === diary.section_id &&
+        d.subject_id === diary.subject_id &&
+        d.diary_date === diary.diary_date &&
+        d.academic_session_id === diary.academic_session_id
+    );
+
+    if (duplicate) {
+      const idx = existingList.findIndex((d) => d.id === duplicate.id);
+      const updated: DailyDiary = {
+        ...existingList[idx],
+        ...normalizedDiary,
+        id: duplicate.id,
+        updated_at: now,
+      };
+      existingList[idx] = updated;
+      setStorage('daily_diaries', existingList);
+      await logAudit(actor || {}, 'DIARY_UPDATED', 'daily_diary', duplicate.id, { date: diary.diary_date, status: diary.status });
+      return updated;
+    }
+
+    const newDiary: DailyDiary = {
+      ...normalizedDiary,
+      id: generateUUID(),
+      created_by: actor?.id,
+      created_at: now,
+      updated_at: now,
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('daily_diary').insert([newDiary]).select().single();
+      if (error) throw error;
+      await logAudit(actor || {}, 'DIARY_CREATED', 'daily_diary', data.id, { date: diary.diary_date, status: diary.status });
+      return data;
+    }
+
+    setStorage('daily_diaries', [newDiary, ...existingList]);
+    await logAudit(actor || {}, 'DIARY_CREATED', 'daily_diary', newDiary.id, { date: diary.diary_date, status: diary.status });
+    return newDiary;
+  },
+
+  deleteDiary: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<void> => {
+    const existing = await diaryApi.getDiaryById(id, actor);
+    if (!existing) throw new Error('Diary entry not found.');
+
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher || existing.teacher_id !== currentTeacher.id) {
+        throw new Error('Unauthorized: You can only delete your own diary entries.');
+      }
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { error } = await supabase.from('daily_diary').delete().eq('id', id);
+      if (error) throw error;
+      await logAudit(actor || {}, 'DIARY_DELETED', 'daily_diary', id, { date: existing.diary_date });
+      return;
+    }
+
+    const diaries = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
+    setStorage('daily_diaries', diaries.filter((d) => d.id !== id));
+    await logAudit(actor || {}, 'DIARY_DELETED', 'daily_diary', id, { date: existing.diary_date });
+  },
 };
 
 // -------------------------------------------------------------
@@ -2033,6 +2392,29 @@ export const studentSearchApi = {
 
     trendItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+    // 7. Subject-Wise Daily Diary Entries for Student's Section (Published entries only)
+    let studentDiaryEntries: DailyDiary[] = [];
+    if (enrollment) {
+      const allDiaries = await diaryApi.getDiaries(
+        {
+          sessionId: targetSessionId,
+          sectionId: enrollment.section_id,
+          status: 'published',
+        },
+        actor
+      );
+
+      // Private teacher notes must never appear in student responses
+      if (actor?.role === 'student') {
+        studentDiaryEntries = allDiaries.map((d) => {
+          const { private_teacher_notes, ...safe } = d;
+          return safe as DailyDiary;
+        });
+      } else {
+        studentDiaryEntries = allDiaries;
+      }
+    }
+
     return {
       student,
       enrollment,
@@ -2041,6 +2423,7 @@ export const studentSearchApi = {
       quizzes: quizResults,
       fees: feeSummary,
       performanceTrend: trendItems,
+      diaryEntries: studentDiaryEntries,
     };
   },
 };

@@ -1,6 +1,6 @@
 // TypeScript Database Models matching 20 PostgreSQL Tables
 
-export type UserRole = 'admin' | 'teacher';
+export type UserRole = 'admin' | 'teacher' | 'student';
 
 export interface Profile {
   id: string; // references auth.users(id)
@@ -305,6 +305,7 @@ export interface Quiz {
   title: string;
   assessment_date: string;
   max_marks: number;
+  instructions?: string;
   created_by?: string;
   created_at: string;
   // joined
@@ -326,6 +327,39 @@ export interface QuizMark {
   // joined
   quiz?: Quiz;
   enrollment?: Enrollment;
+}
+
+// -------------------------------------------------------------
+// SUBJECT-WISE DAILY DIARY
+// -------------------------------------------------------------
+export type DiaryStatus = 'draft' | 'published';
+
+export interface DailyDiary {
+  id: string;
+  academic_session_id: string;
+  class_id: string;
+  section_id: string;
+  subject_id: string;
+  teacher_id: string;
+  diary_date: string; // YYYY-MM-DD
+  lesson_topics: string;
+  homework: string;
+  homework_details?: string;
+  homework_due_date?: string;
+  instructions?: string;
+  upcoming_test_info?: string;
+  instructions_or_test_alerts?: string;
+  private_teacher_notes?: string;
+  status: DiaryStatus;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  // joined
+  class?: ClassLevel;
+  section?: Section;
+  subject?: Subject;
+  teacher?: Teacher;
+  academic_session?: AcademicSession;
 }
 
 export interface StudentSearchResult {
@@ -383,4 +417,5 @@ export interface StudentAcademicSummary {
     type: 'Quiz' | 'Exam';
     percentage: number;
   }[];
+  diaryEntries?: DailyDiary[];
 }

@@ -20,6 +20,7 @@ import {
   AuditLog,
   Quiz,
   QuizMark,
+  DailyDiary,
 } from '@/types/database';
 
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
@@ -819,5 +820,65 @@ export const INITIAL_QUIZ_MARKS: QuizMark[] = [
     remarks: 'Well-structured matrix multiplication',
     created_at: '2025-09-19T14:00:00Z',
     updated_at: '2025-09-19T14:00:00Z',
+  },
+];
+
+// =============================================================
+// SUBJECT-WISE DAILY DIARY
+// =============================================================
+export const INITIAL_DAILY_DIARIES: DailyDiary[] = [
+  {
+    id: 'dd000000-0000-0000-0000-000000000001',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002',
+    class_id: 'c0000000-0000-0000-0000-000000000004',
+    section_id: 'd0000000-0000-0000-0000-000000000001',
+    subject_id: 'e0000000-0000-0000-0000-000000000004', // Mathematics Science
+    teacher_id: 'f0000000-0000-0000-0000-000000000001', // Muhammad Tariq
+    diary_date: '2025-05-12',
+    lesson_topics: 'Chapter 2: Real and Complex Numbers. Covered properties of real numbers and radicals.',
+    homework: 'Exercise 2.3: Questions 1 to 5 on homework notebook. Revise definition of conjugate.',
+    instructions: 'Bring scientific calculators for tomorrow lesson.',
+    upcoming_test_info: 'Surds and Radicals Quiz scheduled for Friday 16th May.',
+    private_teacher_notes: 'Section A boys need extra practice with simplifying expressions involving indices.',
+    status: 'published',
+    created_by: 'u0000000-0000-0000-0000-000000000002',
+    created_at: '2025-05-12T13:30:00Z',
+    updated_at: '2025-05-12T13:30:00Z',
+  },
+  {
+    id: 'dd000000-0000-0000-0000-000000000002',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002',
+    class_id: 'c0000000-0000-0000-0000-000000000004',
+    section_id: 'd0000000-0000-0000-0000-000000000001',
+    subject_id: 'e0000000-0000-0000-0000-000000000001', // English Compulsory
+    teacher_id: 'f0000000-0000-0000-0000-000000000002', // Ayesha Siddiqua
+    diary_date: '2025-05-12',
+    lesson_topics: 'Unit 3: Media and Its Impact. Reading comprehension and vocabulary development.',
+    homework: 'Write paragraph on "Role of Social Media in Education" (100-120 words). Complete Glossary.',
+    instructions: 'Focus on correct tense usage and transitions.',
+    upcoming_test_info: 'Unit 3 Vocabulary & Comprehension assessment next Monday.',
+    private_teacher_notes: 'Reading fluency is good across Section A.',
+    status: 'published',
+    created_by: 'u0000000-0000-0000-0000-000000000003',
+    created_at: '2025-05-12T14:15:00Z',
+    updated_at: '2025-05-12T14:15:00Z',
+  },
+  {
+    id: 'dd000000-0000-0000-0000-000000000003',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002',
+    class_id: 'c0000000-0000-0000-0000-000000000004',
+    section_id: 'd0000000-0000-0000-0000-000000000001',
+    subject_id: 'e0000000-0000-0000-0000-000000000005', // Physics
+    teacher_id: 'f0000000-0000-0000-0000-000000000003', // Bilal Ahmed
+    diary_date: '2025-05-13',
+    lesson_topics: 'Chapter 3: Dynamics. Newton Second Law of Motion (F=ma) and derivation.',
+    homework: 'Conceptual Questions 3.1 to 3.4 from textbook page 68.',
+    instructions: 'Lab session on Thursday requires lab coats.',
+    upcoming_test_info: 'Numerical problems test on Friday.',
+    private_teacher_notes: 'Draft lesson plan for practical vernier caliper measurement.',
+    status: 'draft',
+    created_by: 'u0000000-0000-0000-0000-000000000004',
+    created_at: '2025-05-13T12:00:00Z',
+    updated_at: '2025-05-13T12:00:00Z',
   },
 ];

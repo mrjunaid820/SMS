@@ -28,6 +28,7 @@ import {
   Receipt,
   TrendingUp,
   BookOpen,
+  BookMarked,
   PlusCircle,
   AlertTriangle,
   CheckCircle2,
@@ -35,6 +36,7 @@ import {
   MapPin,
   Calendar,
   Shield,
+  Lock,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -74,7 +76,7 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
   const cls = section?.class;
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'performance' | 'quizzes' | 'exams' | 'attendance' | 'fees'>('performance');
+  const [activeTab, setActiveTab] = useState<'performance' | 'quizzes' | 'exams' | 'attendance' | 'diary' | 'fees'>('performance');
 
   // Print modal state
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -91,6 +93,42 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
   const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
   const [quizFormError, setQuizFormError] = useState<string | null>(null);
   const [quizFormSuccess, setQuizFormSuccess] = useState<string | null>(null);
+
+  // Quiz Filter State
+  const [quizSubjectFilter, setQuizSubjectFilter] = useState<string>('all');
+  const [quizDateFilter, setQuizDateFilter] = useState<string>('');
+
+  const filteredQuizzes = quizzes.filter((qm) => {
+    if (quizSubjectFilter !== 'all' && qm.subject_name.toLowerCase() !== quizSubjectFilter.toLowerCase()) {
+      return false;
+    }
+    if (quizDateFilter && qm.assessment_date !== quizDateFilter) {
+      return false;
+    }
+    return true;
+  });
+
+  // Daily Diary Filter State
+  const [diarySubjectFilter, setDiarySubjectFilter] = useState<string>('all');
+  const [diaryStartDateFilter, setDiaryStartDateFilter] = useState<string>('');
+  const [diaryEndDateFilter, setDiaryEndDateFilter] = useState<string>('');
+
+  const diaryEntries = summary.diaryEntries || [];
+  const filteredDiaries = diaryEntries.filter((d) => {
+    if (diarySubjectFilter !== 'all') {
+      const subjMatch =
+        d.subject_id === diarySubjectFilter ||
+        d.subject?.name?.toLowerCase() === diarySubjectFilter.toLowerCase();
+      if (!subjMatch) return false;
+    }
+    if (diaryStartDateFilter && d.diary_date < diaryStartDateFilter) {
+      return false;
+    }
+    if (diaryEndDateFilter && d.diary_date > diaryEndDateFilter) {
+      return false;
+    }
+    return true;
+  });
 
   // Performance Chart Filter State
   const [trendFilter, setTrendFilter] = useState<'all' | 'quiz' | 'exam'>('all');
@@ -551,7 +589,19 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
           Attendance History
         </button>
 
-        {/* Tab 5 is exclusively for Admins */}
+        <button
+          onClick={() => setActiveTab('diary')}
+          className={`flex items-center gap-2 py-3 px-4 border-b-2 text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+            activeTab === 'diary'
+              ? 'border-navy-900 text-navy-900 dark:border-brand-400 dark:text-white'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+          }`}
+        >
+          <BookMarked className="w-4 h-4" />
+          Daily Diary ({diaryEntries.length})
+        </button>
+
+        {/* Tab is exclusively for Admins */}
         {currentRole === 'admin' && (
           <button
             onClick={() => setActiveTab('fees')}
@@ -709,7 +759,7 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
       {/* Tab 2: Quizzes & Classroom Assessments */}
       {activeTab === 'quizzes' && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <CardTitle className="text-base font-bold text-slate-900 dark:text-white">
                 Classroom Quizzes & Regular Assessments
@@ -718,23 +768,66 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
                 Subject-specific classroom tests, weekly quizzes, and formative grading.
               </p>
             </div>
-            <Button
-              size="sm"
-              leftIcon={<PlusCircle className="w-4 h-4" />}
-              onClick={() => {
-                setQuizFormError(null);
-                setQuizFormSuccess(null);
-                setIsAddQuizModalOpen(true);
-              }}
-            >
-              Add Quiz Mark
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Subject Filter */}
+              <select
+                value={quizSubjectFilter}
+                onChange={(e) => setQuizSubjectFilter(e.target.value)}
+                className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-200"
+              >
+                <option value="all">All Subjects</option>
+                {Array.from(new Set(quizzes.map((q) => q.subject_name))).map((sName) => (
+                  <option key={sName} value={sName}>
+                    {sName}
+                  </option>
+                ))}
+              </select>
+
+              {/* Date Filter */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-400 text-[11px]">Date:</span>
+                <input
+                  type="date"
+                  value={quizDateFilter}
+                  onChange={(e) => setQuizDateFilter(e.target.value)}
+                  className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-slate-800 dark:text-slate-200"
+                />
+              </div>
+
+              {(quizSubjectFilter !== 'all' || quizDateFilter) && (
+                <button
+                  onClick={() => {
+                    setQuizSubjectFilter('all');
+                    setQuizDateFilter('');
+                  }}
+                  className="text-xs text-slate-500 hover:text-rose-600 underline cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+
+              <Button
+                size="sm"
+                leftIcon={<PlusCircle className="w-4 h-4" />}
+                onClick={() => {
+                  setQuizFormError(null);
+                  setQuizFormSuccess(null);
+                  setIsAddQuizModalOpen(true);
+                }}
+              >
+                Add Quiz Mark
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
-            {quizzes.length === 0 ? (
+            {filteredQuizzes.length === 0 ? (
               <div className="py-12 text-center text-slate-400">
                 <BookOpen className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
-                <p className="text-sm font-semibold">No quizzes recorded for this student yet.</p>
+                <p className="text-sm font-semibold">
+                  {quizzes.length === 0
+                    ? 'No quizzes recorded for this student yet.'
+                    : 'No quizzes match the selected filter criteria.'}
+                </p>
                 <p className="text-xs text-slate-500 mt-1">
                   Click "+ Add Quiz Mark" above to record a new assessment score.
                 </p>
@@ -754,7 +847,7 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {quizzes.map((qm, idx) => (
+                    {filteredQuizzes.map((qm, idx) => (
                       <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                         <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
                           {qm.title}
@@ -786,8 +879,8 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
                             <span
                               className={
                                 (qm.percentage || 0) >= 70
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-slate-700 dark:text-slate-300'
+                                   ? 'text-emerald-600 dark:text-emerald-400'
+                                   : 'text-slate-700 dark:text-slate-300'
                               }
                             >
                               {(qm.percentage || 0).toFixed(1)}%
@@ -974,6 +1067,152 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
                 </div>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tab: Daily Diary Entries */}
+      {activeTab === 'diary' && (
+        <Card>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <CardTitle className="text-base font-bold text-slate-900 dark:text-white">
+                Subject-Wise Daily Classroom Diary
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Daily lesson logs, assigned homework, and upcoming test alerts for {cls?.name} - {section?.name}.
+              </p>
+            </div>
+            {/* Filter controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={diarySubjectFilter}
+                onChange={(e) => setDiarySubjectFilter(e.target.value)}
+                className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-slate-800 dark:text-slate-200"
+              >
+                <option value="all">All Subjects</option>
+                {allSubjects.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.code})
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-400 text-[11px]">From:</span>
+                <input
+                  type="date"
+                  value={diaryStartDateFilter}
+                  onChange={(e) => setDiaryStartDateFilter(e.target.value)}
+                  className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-400 text-[11px]">To:</span>
+                <input
+                  type="date"
+                  value={diaryEndDateFilter}
+                  onChange={(e) => setDiaryEndDateFilter(e.target.value)}
+                  className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 text-slate-800 dark:text-slate-200"
+                />
+              </div>
+              {(diarySubjectFilter !== 'all' || diaryStartDateFilter || diaryEndDateFilter) && (
+                <button
+                  onClick={() => {
+                    setDiarySubjectFilter('all');
+                    setDiaryStartDateFilter('');
+                    setDiaryEndDateFilter('');
+                  }}
+                  className="text-xs text-slate-500 hover:text-rose-600 underline cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {filteredDiaries.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <BookMarked className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
+                <p className="text-sm font-semibold">No daily diary entries found.</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {diaryEntries.length === 0
+                    ? 'No published daily diary entries have been posted for this class & section yet.'
+                    : 'No entries match your selected subject or date filters.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredDiaries.map((diary) => (
+                  <div
+                    key={diary.id}
+                    className="p-4 bg-slate-50/70 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3 transition-colors"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800/80 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="font-bold text-navy-900 dark:text-brand-300">
+                          {diary.subject?.name || 'Subject'} {diary.subject?.code ? `(${diary.subject.code})` : ''}
+                        </Badge>
+                        <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                          Teacher: <strong className="text-slate-900 dark:text-slate-200">{diary.teacher?.full_name || 'Class Teacher'}</strong>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>{formatDate(diary.diary_date)}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      <div className="space-y-1">
+                        <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider block">
+                          📖 Lesson Topics Covered:
+                        </span>
+                        <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                          {diary.lesson_topics}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider block">
+                            ✏️ Homework / Assignment:
+                          </span>
+                          {diary.homework_due_date && (
+                            <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                              Due: {formatDate(diary.homework_due_date)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
+                          {diary.homework_details}
+                        </p>
+                      </div>
+                    </div>
+
+                    {diary.instructions_or_test_alerts && (
+                      <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-lg text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block text-[11px]">Notice / Test Alert:</span>
+                          <span className="whitespace-pre-wrap">{diary.instructions_or_test_alerts}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Teacher/Admin only private notes */}
+                    {currentRole !== 'student' && diary.private_teacher_notes && (
+                      <div className="p-2.5 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 rounded-lg text-xs text-purple-900 dark:text-purple-200 flex items-start gap-2">
+                        <Lock className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block text-[11px]">Private Teacher Notes (Internal Only):</span>
+                          <span className="italic whitespace-pre-wrap">{diary.private_teacher_notes}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

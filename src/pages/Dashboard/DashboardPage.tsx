@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Activity,
   BookOpen,
+  BookMarked,
   CalendarCheck,
   Award,
   ChevronRight,
@@ -171,6 +172,24 @@ export const DashboardPage: React.FC = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              leftIcon={<BookMarked className="w-4 h-4" />}
+              onClick={() => navigate('/daily-diary')}
+            >
+              Daily Diary
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              leftIcon={<BookOpen className="w-4 h-4" />}
+              onClick={() => navigate('/quiz-marks')}
+            >
+              Quiz Marks
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -339,6 +358,22 @@ export const DashboardPage: React.FC = () => {
             <option value="last_3_months">Last 3 Months</option>
             <option value="all">Entire Academic Year</option>
           </select>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<BookMarked className="w-3.5 h-3.5" />}
+            onClick={() => navigate('/daily-diary')}
+          >
+            Daily Diary
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<BookOpen className="w-3.5 h-3.5" />}
+            onClick={() => navigate('/quiz-marks')}
+          >
+            Quiz Marks
+          </Button>
           <Button
             size="sm"
             leftIcon={<Search className="w-3.5 h-3.5" />}
