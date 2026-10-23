@@ -26,6 +26,12 @@ import { QuizMarksPage } from '@/pages/QuizMarks/QuizMarksPage';
 import { DailyDiaryPage } from '@/pages/DailyDiary/DailyDiaryPage';
 import { LoginPage } from '@/pages/Auth/LoginPage';
 
+// Student Portal Modules
+import { StudentDashboardPage } from '@/pages/StudentPortal/StudentDashboardPage';
+import { MyQuizMarksPage } from '@/pages/StudentPortal/MyQuizMarksPage';
+import { MyDailyDiaryPage } from '@/pages/StudentPortal/MyDailyDiaryPage';
+import { MyProfilePage } from '@/pages/StudentPortal/MyProfilePage';
+
 const ProtectedLayout: React.FC = () => {
   const { isAuthenticated } = useAuth();
   if (!isAuthenticated) {
@@ -37,7 +43,7 @@ const ProtectedLayout: React.FC = () => {
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { role } = useAuth();
   if (role !== 'admin') {
-    return <Navigate to="/teacher-dashboard" replace />;
+    return <Navigate to={role === 'student' ? '/student-dashboard' : '/teacher-dashboard'} replace />;
   }
   return <>{children}</>;
 };
@@ -45,13 +51,32 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const TeacherRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { role } = useAuth();
   if (role !== 'teacher') {
-    return <Navigate to="/admin-dashboard" replace />;
+    return <Navigate to={role === 'student' ? '/student-dashboard' : '/admin-dashboard'} replace />;
+  }
+  return <>{children}</>;
+};
+
+const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { role } = useAuth();
+  if (role !== 'student') {
+    return <Navigate to={role === 'teacher' ? '/teacher-dashboard' : '/admin-dashboard'} replace />;
+  }
+  return <>{children}</>;
+};
+
+const StaffRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { role } = useAuth();
+  if (role === 'student') {
+    return <Navigate to="/student-dashboard" replace />;
   }
   return <>{children}</>;
 };
 
 const DashboardRedirect: React.FC = () => {
   const { role } = useAuth();
+  if (role === 'student') {
+    return <Navigate to="/student-dashboard" replace />;
+  }
   return <Navigate to={role === 'teacher' ? '/teacher-dashboard' : '/admin-dashboard'} replace />;
 };
 
@@ -85,10 +110,46 @@ export const App: React.FC = () => {
                     </TeacherRoute>
                   }
                 />
-                <Route path="/students" element={<StudentsPage />} />
-                <Route path="/quick-search" element={<StudentQuickSearchPage />} />
-                <Route path="/quiz-marks" element={<QuizMarksPage />} />
-                <Route path="/daily-diary" element={<DailyDiaryPage />} />
+
+                {/* Student Portal Routes */}
+                <Route
+                  path="/student-dashboard"
+                  element={
+                    <StudentRoute>
+                      <StudentDashboardPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-quiz-marks"
+                  element={
+                    <StudentRoute>
+                      <MyQuizMarksPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-daily-diary"
+                  element={
+                    <StudentRoute>
+                      <MyDailyDiaryPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-profile"
+                  element={
+                    <StudentRoute>
+                      <MyProfilePage />
+                    </StudentRoute>
+                  }
+                />
+
+                {/* Staff / Faculty Protected Routes */}
+                <Route path="/students" element={<StaffRoute><StudentsPage /></StaffRoute>} />
+                <Route path="/quick-search" element={<StaffRoute><StudentQuickSearchPage /></StaffRoute>} />
+                <Route path="/quiz-marks" element={<StaffRoute><QuizMarksPage /></StaffRoute>} />
+                <Route path="/daily-diary" element={<StaffRoute><DailyDiaryPage /></StaffRoute>} />
                 
                 {/* Admin Only Protected Routes */}
                 <Route
@@ -107,8 +168,8 @@ export const App: React.FC = () => {
                     </AdminRoute>
                   }
                 />
-                <Route path="/classes-sections" element={<ClassesSectionsPage />} />
-                <Route path="/subjects" element={<SubjectsPage />} />
+                <Route path="/classes-sections" element={<StaffRoute><ClassesSectionsPage /></StaffRoute>} />
+                <Route path="/subjects" element={<StaffRoute><SubjectsPage /></StaffRoute>} />
                 <Route
                   path="/teacher-assignments"
                   element={
@@ -117,7 +178,7 @@ export const App: React.FC = () => {
                     </AdminRoute>
                   }
                 />
-                <Route path="/attendance" element={<AttendancePage />} />
+                <Route path="/attendance" element={<StaffRoute><AttendancePage /></StaffRoute>} />
                 <Route
                   path="/fees-accounts"
                   element={
@@ -126,9 +187,9 @@ export const App: React.FC = () => {
                     </AdminRoute>
                   }
                 />
-                <Route path="/examinations" element={<ExaminationsPage />} />
-                <Route path="/results-report-cards" element={<ResultsPage />} />
-                <Route path="/reports-exports" element={<ReportsPage />} />
+                <Route path="/examinations" element={<StaffRoute><ExaminationsPage /></StaffRoute>} />
+                <Route path="/results-report-cards" element={<StaffRoute><ResultsPage /></StaffRoute>} />
+                <Route path="/reports-exports" element={<StaffRoute><ReportsPage /></StaffRoute>} />
                 <Route
                   path="/audit-logs"
                   element={

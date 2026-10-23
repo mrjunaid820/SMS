@@ -85,6 +85,8 @@ export interface TeacherAssignment {
 
 export interface Student {
   id: string;
+  profile_id?: string;
+  email?: string;
   admission_no: string;
   full_name: string;
   date_of_birth: string;
@@ -306,6 +308,7 @@ export interface Quiz {
   assessment_date: string;
   max_marks: number;
   instructions?: string;
+  status?: 'draft' | 'published';
   created_by?: string;
   created_at: string;
   // joined

@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { MAIN_NAV_ITEMS } from '@/config/constants';
+import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
 import {
@@ -54,11 +54,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
   const { role } = useAuth();
   const { settings, currentSession } = useSchool();
 
-  // Filter items based on user role (Admin vs Teacher)
-  const allowedNavItems = MAIN_NAV_ITEMS.filter((item) => {
-    if (role === 'teacher' && item.adminOnly) return false;
-    return true;
-  });
+  // Filter items based on user role (Admin vs Teacher vs Student)
+  const allowedNavItems =
+    role === 'student'
+      ? STUDENT_NAV_ITEMS
+      : MAIN_NAV_ITEMS.filter((item) => {
+          if (role === 'teacher' && item.adminOnly) return false;
+          return true;
+        });
 
   const location = useLocation();
 
@@ -146,7 +149,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
             <span
               className={cn(
                 'text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider',
-                role === 'admin' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                role === 'admin'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : role === 'teacher'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
               )}
             >
               {role}
@@ -157,11 +164,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
             <span
               className={cn(
                 'text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider',
-                role === 'admin' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                role === 'admin'
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : role === 'teacher'
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : 'bg-indigo-500/20 text-indigo-300'
               )}
               title={`Logged in as ${role}`}
             >
-              {role === 'admin' ? 'ADM' : 'TCH'}
+              {role === 'admin' ? 'ADM' : role === 'teacher' ? 'TCH' : 'STU'}
             </span>
           </div>
         )}

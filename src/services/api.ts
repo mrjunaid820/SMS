@@ -61,7 +61,7 @@ function getStorage<T>(key: string, initial: T): T {
   } catch (e) {
     console.warn(`Failed to read sms_${key} from storage`, e);
   }
-  return initial;
+  return initial && typeof initial === 'object' ? JSON.parse(JSON.stringify(initial)) : initial;
 }
 
 function setStorage<T>(key: string, data: T): void {
@@ -925,6 +925,250 @@ export const studentApi = {
       actor
     );
   },
+
+  getStudentByProfileId: async (profileId: string): Promise<Student | null> => {
+    const students = await studentApi.getStudents(true);
+    return (
+      students.find(
+        (s) =>
+          s.profile_id === profileId ||
+          (s.email && s.email.toLowerCase() === profileId.toLowerCase())
+      ) || null
+    );
+  },
+
+  provisionStudentAccount: async (
+    studentId: string,
+    email: string,
+    optionsOrPassword?: string | { temporaryPassword?: string; sendResetLink?: boolean },
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ profile: Profile; student: Student }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to provision student accounts.');
+    }
+
+    const options =
+      typeof optionsOrPassword === 'string'
+        ? { temporaryPassword: optionsOrPassword }
+        : optionsOrPassword || {};
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      throw new Error('Validation Error: A valid student email address is required.');
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const sIdx = students.findIndex((s) => s.id === studentId);
+    if (sIdx === -1) {
+      throw new Error('Student record not found.');
+    }
+    const student = students[sIdx];
+    if (!student.is_active) {
+      throw new Error('Cannot provision account for an archived or inactive student.');
+    }
+
+    // Check if student already has a portal account linked
+    if (student.profile_id) {
+      throw new Error('Student already has an active portal login account linked.');
+    }
+
+    // Check duplicate email across existing profiles
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const emailConflict = profiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    if (emailConflict) {
+      throw new Error(`Validation Error: An account with email "${cleanEmail}" is already registered.`);
+    }
+
+    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    const newProfileId = generateUUID();
+    const newProfile: Profile = {
+      id: newProfileId,
+      full_name: student.full_name,
+      email: cleanEmail,
+      phone: student.guardian_phone,
+      role: 'student',
+      is_active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'provision_student',
+            studentId,
+            email: cleanEmail,
+            temporaryPassword: options.temporaryPassword,
+          },
+        });
+        if (error) throw new Error(`Supabase Auth provisioning failed: ${error.message}`);
+      } catch (e: any) {
+        // Direct database fallback if edge function not yet deployed
+        await supabase.from('profiles').insert([newProfile]);
+        await supabase
+          .from('students')
+          .update({ profile_id: newProfileId, email: cleanEmail, updated_at: new Date().toISOString() })
+          .eq('id', studentId);
+      }
+    } else {
+      // Local persistent storage mode
+      setStorage('profiles', [...profiles, newProfile]);
+
+      if (options.temporaryPassword) {
+        try {
+          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+          passMap[newProfileId] = options.temporaryPassword;
+          passMap[cleanEmail] = options.temporaryPassword;
+          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+        } catch {}
+      }
+
+      const updatedStudent: Student = {
+        ...student,
+        profile_id: newProfileId,
+        email: cleanEmail,
+        updated_at: new Date().toISOString(),
+      };
+      students[sIdx] = updatedStudent;
+      setStorage('students', [...students]);
+    }
+
+    await logAudit(
+      actor || {},
+      'STUDENT_ACCOUNT_PROVISIONED',
+      'students',
+      studentId,
+      {
+        profile_id: newProfileId,
+        student_admission_no: student.admission_no,
+        email: cleanEmail,
+        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'INVITATION_LINK_DISPATCHED',
+      }
+    );
+
+    const updatedStudents = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const finalStudent = updatedStudents.find((s) => s.id === studentId) || { ...student, profile_id: newProfileId, email: cleanEmail };
+
+    return { profile: newProfile, student: finalStudent };
+  },
+
+  resetStudentPassword: async (
+    studentId: string,
+    optionsOrPassword: string | { temporaryPassword?: string; sendResetLink?: boolean },
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; profileId?: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to reset student passwords.');
+    }
+
+    const options =
+      typeof optionsOrPassword === 'string'
+        ? { temporaryPassword: optionsOrPassword }
+        : optionsOrPassword || {};
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const student = students.find((s) => s.id === studentId);
+    if (!student) throw new Error('Student record not found.');
+    if (!student.profile_id && !student.email) {
+      throw new Error('Student does not have a linked portal account.');
+    }
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const profile = profiles.find(
+      (p) => p.id === student.profile_id || (student.email && p.email.toLowerCase() === student.email.toLowerCase())
+    );
+    if (!profile) throw new Error('Linked student authentication profile not found.');
+
+    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: options.temporaryPassword ? 'set_temporary_password' : 'send_reset_link',
+            userId: profile.id,
+            temporaryPassword: options.temporaryPassword,
+          },
+        });
+      } catch (e: any) {
+        if (options.sendResetLink && profile.email) {
+          await supabase.auth.resetPasswordForEmail(profile.email);
+        }
+      }
+    } else {
+      if (options.temporaryPassword) {
+        try {
+          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+          passMap[profile.id] = options.temporaryPassword;
+          passMap[profile.email.toLowerCase()] = options.temporaryPassword;
+          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+        } catch {}
+      }
+    }
+
+    await logAudit(
+      actor || {},
+      'STUDENT_PASSWORD_RESET',
+      'profiles',
+      profile.id,
+      {
+        target_student_id: student.id,
+        target_email: profile.email,
+        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'RESET_LINK_DISPATCHED',
+      }
+    );
+
+    return {
+      success: true,
+      profileId: profile.id,
+      message: options.temporaryPassword
+        ? `Temporary password successfully assigned for ${student.full_name}. Active sessions revoked.`
+        : `Authorized password reset link dispatched to ${profile.email}.`,
+    };
+  },
+
+  toggleStudentAccountStatus: async (
+    studentId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ is_active: boolean; profile: Profile }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to modify account status.');
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const student = students.find((s) => s.id === studentId);
+    if (!student || !student.profile_id) {
+      throw new Error('Student does not have a linked portal account.');
+    }
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const pIdx = profiles.findIndex((p) => p.id === student.profile_id);
+    if (pIdx === -1) throw new Error('Linked user account profile not found.');
+
+    const newActiveState = !profiles[pIdx].is_active;
+    profiles[pIdx] = {
+      ...profiles[pIdx],
+      is_active: newActiveState,
+      updated_at: new Date().toISOString(),
+    };
+    setStorage('profiles', [...profiles]);
+
+    await logAudit(
+      actor || {},
+      newActiveState ? 'STUDENT_ACCOUNT_ENABLED' : 'STUDENT_ACCOUNT_DISABLED',
+      'profiles',
+      profiles[pIdx].id,
+      { student_id: student.id, new_status: newActiveState }
+    );
+
+    return { is_active: newActiveState, profile: profiles[pIdx] };
+  },
 };
 
 // -------------------------------------------------------------
@@ -1578,6 +1822,11 @@ export const quizApi = {
       return quizzes.filter((q) => assignedSectionIds.has(q.section_id));
     }
 
+    // Role scoping for students (hide draft quizzes)
+    if (actor?.role === 'student') {
+      return quizzes.filter((q) => q.status !== 'draft');
+    }
+
     return quizzes;
   },
 
@@ -1622,6 +1871,7 @@ export const quizApi = {
       ...quiz,
       id: generateUUID(),
       max_marks: Number(quiz.max_marks),
+      status: quiz.status || 'published',
       created_by: actor?.id,
       created_at: new Date().toISOString(),
     };
@@ -1661,9 +1911,12 @@ export const quizApi = {
       }));
   },
 
-  getStudentQuizMarks: async (enrollmentId: string): Promise<(QuizMark & { quiz: Quiz })[]> => {
+  getStudentQuizMarks: async (
+    enrollmentId: string,
+    actor?: { role?: string }
+  ): Promise<(QuizMark & { quiz: Quiz })[]> => {
     const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
-    const quizzes = await quizApi.getQuizzes();
+    const quizzes = await quizApi.getQuizzes(undefined, actor as any);
 
     return allMarks
       .filter((m) => m.enrollment_id === enrollmentId)
@@ -1674,7 +1927,7 @@ export const quizApi = {
           quiz: quiz!,
         };
       })
-      .filter((m) => Boolean(m.quiz));
+      .filter((m) => Boolean(m.quiz) && (!actor || actor.role !== 'student' || m.quiz.status !== 'draft'));
   },
 
   saveQuizMarksBatch: async (
@@ -1767,7 +2020,7 @@ export const quizApi = {
 
   updateQuiz: async (
     quizId: string,
-    updates: Partial<Pick<Quiz, 'title' | 'assessment_date' | 'max_marks' | 'instructions'>>,
+    updates: Partial<Pick<Quiz, 'title' | 'assessment_date' | 'max_marks' | 'instructions' | 'status'>>,
     actor?: { id?: string; name?: string; role?: string; email?: string }
   ): Promise<Quiz> => {
     const quiz = await quizApi.getQuizById(quizId);
@@ -2427,4 +2680,113 @@ export const studentSearchApi = {
     };
   },
 };
+
+// -------------------------------------------------------------
+// 13. STUDENT PORTAL DATA ACCESS & SCOPING
+// -------------------------------------------------------------
+export const studentPortalApi = {
+  getStudentSelf: async (profileId: string): Promise<{ student: Student; enrollment?: Enrollment }> => {
+    const students = await studentApi.getStudents(true);
+    const student = students.find(
+      (s) =>
+        s.profile_id === profileId ||
+        (s.email && s.email.toLowerCase() === profileId.toLowerCase())
+    );
+    if (!student) {
+      throw new Error('No student record is linked to this user profile.');
+    }
+    const enrollments = await studentApi.getEnrollments();
+    const enrollment =
+      enrollments.find((e) => e.student_id === student.id && e.status === 'active') ||
+      enrollments.find((e) => e.student_id === student.id);
+    return { student, enrollment };
+  },
+
+  getMyDashboardStats: async (profileId: string) => {
+    const { student, enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    let quizCount = 0;
+    let quizAvgPct = 0;
+    let recentQuizzes: (QuizMark & { quiz: Quiz })[] = [];
+    let recentDiaries: DailyDiary[] = [];
+    let attendancePct = 100;
+
+    if (enrollment) {
+      // 1. Quizzes (published only)
+      const allStudentMarks = await quizApi.getStudentQuizMarks(enrollment.id, { role: 'student' });
+      const publishedMarks = allStudentMarks.filter((m) => m.quiz && m.quiz.status !== 'draft');
+      quizCount = publishedMarks.length;
+
+      const totalMax = publishedMarks.reduce((acc, curr) => acc + (curr.quiz?.max_marks || 0), 0);
+      const totalObtained = publishedMarks.reduce(
+        (acc, curr) => acc + (curr.is_absent ? 0 : curr.marks_obtained || 0),
+        0
+      );
+      quizAvgPct = totalMax > 0 ? Math.round((totalObtained / totalMax) * 1000) / 10 : 0;
+      recentQuizzes = publishedMarks.slice(0, 5);
+
+      // 2. Daily Diary (published only for enrolled section, stripped of private notes)
+      const diaries = await diaryApi.getDiaries(
+        {
+          sectionId: enrollment.section_id,
+          sessionId: enrollment.academic_session_id,
+          status: 'published',
+        },
+        { role: 'student' }
+      );
+      recentDiaries = diaries.slice(0, 5);
+
+      // 3. Attendance Rate
+      const attRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
+      const present = attRecords.filter((r) => r.status === 'Present' || r.status === 'Late').length;
+      attendancePct = attRecords.length > 0 ? Math.round((present / attRecords.length) * 1000) / 10 : 100;
+    }
+
+    return {
+      student,
+      enrollment,
+      quizCount,
+      quizAvgPct,
+      attendancePct,
+      recentQuizzes,
+      recentDiaries,
+    };
+  },
+
+  getMyQuizMarks: async (
+    profileId: string,
+    filters?: { subjectId?: string; date?: string }
+  ): Promise<(QuizMark & { quiz: Quiz })[]> => {
+    const { enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    if (!enrollment) return [];
+
+    const allMarks = await quizApi.getStudentQuizMarks(enrollment.id, { role: 'student' });
+    return allMarks.filter((m) => {
+      if (!m.quiz || m.quiz.status === 'draft') return false;
+      if (filters?.subjectId && m.quiz.subject_id !== filters.subjectId) return false;
+      if (filters?.date && m.quiz.assessment_date !== filters.date) return false;
+      return true;
+    });
+  },
+
+  getMyDailyDiary: async (
+    profileId: string,
+    filters?: { subjectId?: string; startDate?: string; endDate?: string }
+  ): Promise<DailyDiary[]> => {
+    const { enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    if (!enrollment) return [];
+
+    return diaryApi.getDiaries(
+      {
+        sectionId: enrollment.section_id,
+        sessionId: enrollment.academic_session_id,
+        subjectId: filters?.subjectId,
+        startDate: filters?.startDate,
+        endDate: filters?.endDate,
+        status: 'published',
+      },
+      { role: 'student' }
+    );
+  },
+};
+
 

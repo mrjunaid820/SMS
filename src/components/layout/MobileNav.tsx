@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { MAIN_NAV_ITEMS } from '@/config/constants';
+import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
 import {
@@ -55,10 +55,13 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  const allowedNavItems = MAIN_NAV_ITEMS.filter((item) => {
-    if (role === 'teacher' && item.adminOnly) return false;
-    return true;
-  });
+  const allowedNavItems =
+    role === 'student'
+      ? STUDENT_NAV_ITEMS
+      : MAIN_NAV_ITEMS.filter((item) => {
+          if (role === 'teacher' && item.adminOnly) return false;
+          return true;
+        });
 
   return (
     <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">

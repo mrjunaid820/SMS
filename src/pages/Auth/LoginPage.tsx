@@ -29,6 +29,8 @@ export const LoginPage: React.FC = () => {
       const authenticatedUser = await login(email.trim(), password);
       if (authenticatedUser?.role === 'teacher') {
         navigate('/teacher-dashboard');
+      } else if (authenticatedUser?.role === 'student') {
+        navigate('/student-dashboard');
       } else {
         navigate('/admin-dashboard');
       }
@@ -53,7 +55,7 @@ export const LoginPage: React.FC = () => {
             {settings.school_name || 'Islamia Public High School'}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Institutional Administration & Faculty Portal
+            Institutional Administration, Faculty & Student Portal
           </p>
         </div>
 
@@ -65,10 +67,10 @@ export const LoginPage: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
-            label="Staff Email Address"
+            label="Account Email Address"
             type="email"
             required
-            placeholder="e.g. staff@islamiapublic.edu.pk"
+            placeholder="e.g. user@islamiapublic.edu.pk"
             leftIcon={<Mail className="w-4 h-4" />}
             value={email}
             onChange={(e) => setEmail(e.target.value)}

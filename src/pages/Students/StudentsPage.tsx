@@ -27,6 +27,8 @@ import {
   AlertTriangle,
   Pencil,
   Search,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
@@ -53,6 +55,15 @@ export const StudentsPage: React.FC = () => {
   const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
+
+  // Student Portal Account Provisioning Modal
+  const [isPortalModalOpen, setIsPortalModalOpen] = useState(false);
+  const [portalStudent, setPortalStudent] = useState<Student | null>(null);
+  const [portalEmail, setPortalEmail] = useState('');
+  const [portalPassword, setPortalPassword] = useState('');
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const [portalSuccess, setPortalSuccess] = useState<string | null>(null);
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
@@ -297,6 +308,101 @@ export const StudentsPage: React.FC = () => {
     }
   };
 
+  const handleOpenPortalModal = (student: Student) => {
+    setPortalStudent(student);
+    setPortalError(null);
+    setPortalSuccess(null);
+    setPortalPassword('');
+    if (student.email) {
+      setPortalEmail(student.email);
+    } else {
+      const sanitizedAdmission = (student.admission_no || 'stu')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      setPortalEmail(`student.${sanitizedAdmission}@islamiapublic.edu.pk`);
+    }
+    setIsPortalModalOpen(true);
+  };
+
+  const handleProvisionPortalAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalStudent) return;
+    setPortalError(null);
+    setPortalSuccess(null);
+
+    if (!portalEmail.trim()) {
+      setPortalError('Please provide a valid login email address.');
+      return;
+    }
+    if (!portalPassword || portalPassword.length < 6) {
+      setPortalError('Initial password must be at least 6 characters.');
+      return;
+    }
+
+    setPortalLoading(true);
+    try {
+      const res = await studentApi.provisionStudentAccount(
+        portalStudent.id,
+        portalEmail.trim(),
+        portalPassword,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setPortalSuccess(`Portal account provisioned successfully for ${portalStudent.full_name} (${res.profile.email}).`);
+      await loadData();
+      setPortalStudent((prev) => (prev ? { ...prev, profile_id: res.profile.id, email: res.profile.email } : null));
+    } catch (err: any) {
+      setPortalError(err.message || 'Failed to provision portal account.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleResetPortalPassword = async () => {
+    if (!portalStudent) return;
+    setPortalError(null);
+    setPortalSuccess(null);
+
+    if (!portalPassword || portalPassword.length < 6) {
+      setPortalError('New password must be at least 6 characters.');
+      return;
+    }
+
+    setPortalLoading(true);
+    try {
+      await studentApi.resetStudentPassword(
+        portalStudent.id,
+        portalPassword,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setPortalSuccess(`Password reset successfully for ${portalStudent.full_name}.`);
+      setPortalPassword('');
+    } catch (err: any) {
+      setPortalError(err.message || 'Failed to reset password.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleTogglePortalStatus = async () => {
+    if (!portalStudent) return;
+    setPortalError(null);
+    setPortalSuccess(null);
+
+    setPortalLoading(true);
+    try {
+      const res = await studentApi.toggleStudentAccountStatus(
+        portalStudent.id,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setPortalSuccess(`Account is now ${res.profile.is_active ? 'Active' : 'Deactivated'}.`);
+      await loadData();
+    } catch (err: any) {
+      setPortalError(err.message || 'Failed to update account status.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
   // CSV Export
   const handleExportCSV = () => {
     const rows = students.map((s) => {
@@ -435,6 +541,18 @@ export const StudentsPage: React.FC = () => {
       ),
     },
     {
+      key: 'portal_access',
+      header: 'Portal Access',
+      render: (row) => {
+        const hasPortal = Boolean(row.profile_id || row.email);
+        return (
+          <Badge variant={hasPortal ? 'info' : 'default'}>
+            {hasPortal ? 'Portal Active' : 'No Account'}
+          </Badge>
+        );
+      },
+    },
+    {
       key: 'actions',
       header: 'Actions',
       className: 'text-right',
@@ -459,6 +577,15 @@ export const StudentsPage: React.FC = () => {
                 title="Edit Student Details"
               >
                 <Pencil className="w-4 h-4" />
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => handleOpenPortalModal(row)}
+                className="p-1.5 text-brand-600 hover:text-brand-800 dark:hover:text-brand-300 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/40"
+                title="Manage Student Portal Account"
+              >
+                <KeyRound className="w-4 h-4" />
               </button>
             )}
             <button
@@ -1105,6 +1232,143 @@ export const StudentsPage: React.FC = () => {
               Confirm Import ({csvPreview?.validRows.length || 0} Students)
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* 5. Student Portal Account Management Modal */}
+      <Modal
+        isOpen={isPortalModalOpen}
+        onClose={() => {
+          setIsPortalModalOpen(false);
+          setPortalError(null);
+          setPortalSuccess(null);
+        }}
+        title={`Student Portal Access — ${portalStudent?.full_name || ''}`}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                {portalStudent?.full_name} ({portalStudent?.admission_no})
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Guardian: {portalStudent?.guardian_name} ({portalStudent?.guardian_phone})
+              </div>
+            </div>
+            <Badge variant={portalStudent?.profile_id || portalStudent?.email ? 'info' : 'default'}>
+              {portalStudent?.profile_id || portalStudent?.email ? 'Provisioned' : 'Not Provisioned'}
+            </Badge>
+          </div>
+
+          {portalError && (
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
+              {portalError}
+            </div>
+          )}
+
+          {portalSuccess && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+              {portalSuccess}
+            </div>
+          )}
+
+          {portalStudent?.profile_id || portalStudent?.email ? (
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Linked Student Login Email
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={portalStudent.email || portalEmail}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono"
+                />
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                  Reset Account Password
+                </h4>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Enter new password (min 6 chars)"
+                    type="password"
+                    value={portalPassword}
+                    onChange={(e) => setPortalPassword(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    isLoading={portalLoading}
+                    onClick={handleResetPortalPassword}
+                    disabled={!portalPassword || portalPassword.length < 6}
+                  >
+                    Set Password
+                  </Button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                    Account Status Controls
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Temporarily disable or restore student login access
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  isLoading={portalLoading}
+                  onClick={handleTogglePortalStatus}
+                >
+                  Toggle Access
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleProvisionPortalAccount} className="space-y-3">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Create a dedicated login profile for this student. Once provisioned, the student can log in to view their own quiz marks, class daily diary, and academic record.
+              </p>
+
+              <Input
+                label="Student Login Email"
+                type="email"
+                required
+                value={portalEmail}
+                onChange={(e) => setPortalEmail(e.target.value)}
+                placeholder="e.g. student@school.edu.pk"
+              />
+
+              <Input
+                label="Initial Password"
+                type="password"
+                required
+                value={portalPassword}
+                onChange={(e) => setPortalPassword(e.target.value)}
+                placeholder="Enter password (min 6 characters)"
+              />
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsPortalModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" isLoading={portalLoading}>
+                  Provision Portal Account
+                </Button>
+              </div>
+            </form>
+          )}
         </div>
       </Modal>
 

@@ -71,3 +71,10 @@ export const MAIN_NAV_ITEMS: NavItemConfig[] = [
   { id: 'school-settings', label: 'School Settings', path: '/school-settings', iconName: 'Sliders', adminOnly: true, category: 'admin' },
   { id: 'users-roles', label: 'User & Role Mgmt', path: '/users-roles', iconName: 'UserCog', adminOnly: true, category: 'admin' },
 ];
+
+export const STUDENT_NAV_ITEMS: NavItemConfig[] = [
+  { id: 'student-dashboard', label: 'My Dashboard', path: '/student-dashboard', iconName: 'LayoutDashboard', category: 'core' },
+  { id: 'my-quiz-marks', label: 'My Quiz Marks', path: '/my-quiz-marks', iconName: 'BookOpen', category: 'academic' },
+  { id: 'my-daily-diary', label: 'My Daily Diary', path: '/my-daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
+  { id: 'my-profile', label: 'My Profile', path: '/my-profile', iconName: 'UserCheck', category: 'core' },
+];
