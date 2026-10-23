@@ -23,6 +23,7 @@ import {
   Award,
   ChevronRight,
   ShieldCheck,
+  Search,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -188,6 +189,15 @@ export const DashboardPage: React.FC = () => {
             >
               Enter Marks
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              leftIcon={<Search className="w-4 h-4" />}
+              onClick={() => navigate('/quick-search')}
+            >
+              Student Quick Search
+            </Button>
           </div>
         </div>
 
@@ -329,6 +339,13 @@ export const DashboardPage: React.FC = () => {
             <option value="last_3_months">Last 3 Months</option>
             <option value="all">Entire Academic Year</option>
           </select>
+          <Button
+            size="sm"
+            leftIcon={<Search className="w-3.5 h-3.5" />}
+            onClick={() => navigate('/quick-search')}
+          >
+            Quick Search
+          </Button>
           <Button variant="outline" size="sm" onClick={loadDashboardData} title="Refresh Live Data">
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>

@@ -1,8 +1,9 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useSchool } from '@/context/SchoolContext';
-import { Menu, Sun, Moon, LogOut, Calendar } from 'lucide-react';
+import { Menu, Sun, Moon, LogOut, Calendar, Search } from 'lucide-react';
 import { Button } from '@/components/common/Button';
 
 export interface HeaderProps {
@@ -10,6 +11,7 @@ export interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
+  const navigate = useNavigate();
   const { user, role, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { sessions, selectedSessionId, setSelectedSessionId } = useSchool();
@@ -46,6 +48,16 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
 
       {/* Right: Theme Toggle & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Quick Search Shortcut */}
+        <button
+          onClick={() => navigate('/quick-search')}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors focus:outline-none cursor-pointer"
+          title="Student Quick Search & Academic Performance"
+        >
+          <Search className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+          <span className="hidden md:inline">Quick Search</span>
+        </button>
+
         {/* Theme Toggle Button */}
         <button
           onClick={toggleTheme}

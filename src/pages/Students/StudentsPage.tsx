@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Student, Enrollment, ClassLevel, Section, AcademicSession } from '@/types/database';
 import { studentApi, academicStructureApi, settingsApi } from '@/services/api';
 import { useSchool } from '@/context/SchoolContext';
@@ -25,9 +26,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   Pencil,
+  Search,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const { settings, currentSession, selectedSessionId } = useSchool();
@@ -510,6 +513,15 @@ export const StudentsPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<Search className="w-3.5 h-3.5" />}
+            onClick={() => navigate('/quick-search')}
+          >
+            Quick Search & Performance
+          </Button>
+
           <Button
             variant="outline"
             size="sm"

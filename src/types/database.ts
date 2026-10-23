@@ -292,3 +292,95 @@ export interface AuditLog {
   ip_address?: string;
   created_at: string;
 }
+
+// -------------------------------------------------------------
+// QUIZZES & CLASSROOM ASSESSMENTS
+// -------------------------------------------------------------
+export interface Quiz {
+  id: string;
+  academic_session_id: string;
+  class_id: string;
+  section_id: string;
+  subject_id: string;
+  title: string;
+  assessment_date: string;
+  max_marks: number;
+  created_by?: string;
+  created_at: string;
+  // joined
+  class?: ClassLevel;
+  section?: Section;
+  subject?: Subject;
+  academic_session?: AcademicSession;
+}
+
+export interface QuizMark {
+  id: string;
+  quiz_id: string;
+  enrollment_id: string;
+  marks_obtained?: number;
+  is_absent: boolean;
+  remarks?: string;
+  created_at: string;
+  updated_at: string;
+  // joined
+  quiz?: Quiz;
+  enrollment?: Enrollment;
+}
+
+export interface StudentSearchResult {
+  student: Student;
+  enrollment?: Enrollment;
+}
+
+export interface StudentAcademicSummary {
+  student: Student;
+  enrollment?: Enrollment;
+  attendance: {
+    total: number;
+    present: number;
+    absent: number;
+    late: number;
+    leave: number;
+    percentage: number;
+    history: AttendanceRecord[];
+  };
+  exams: {
+    exam_id: string;
+    exam_name: string;
+    subject_id: string;
+    subject_name: string;
+    marks_obtained?: number;
+    max_marks: number;
+    percentage?: number;
+    grade: string;
+    is_absent: boolean;
+    remarks?: string;
+    exam_date?: string;
+  }[];
+  quizzes: {
+    quiz_id: string;
+    title: string;
+    subject_name: string;
+    assessment_date: string;
+    marks_obtained?: number;
+    max_marks: number;
+    percentage?: number;
+    is_absent: boolean;
+    remarks?: string;
+  }[];
+  fees: {
+    total_invoiced: number;
+    total_paid: number;
+    outstanding_balance: number;
+    status: 'Paid' | 'Partially Paid' | 'Unpaid' | 'Overdue';
+    invoices: FeeInvoice[];
+  } | null;
+  performanceTrend: {
+    date: string;
+    title: string;
+    subject: string;
+    type: 'Quiz' | 'Exam';
+    percentage: number;
+  }[];
+}

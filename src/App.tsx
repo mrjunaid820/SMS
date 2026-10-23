@@ -21,6 +21,7 @@ import { ReportsPage } from '@/pages/Reports/ReportsPage';
 import { AuditLogsPage } from '@/pages/AuditLogs/AuditLogsPage';
 import { SettingsPage } from '@/pages/Settings/SettingsPage';
 import { UsersRolesPage } from '@/pages/UsersRoles/UsersRolesPage';
+import { StudentQuickSearchPage } from '@/pages/QuickSearch/StudentQuickSearchPage';
 import { LoginPage } from '@/pages/Auth/LoginPage';
 
 const ProtectedLayout: React.FC = () => {
@@ -83,6 +84,7 @@ export const App: React.FC = () => {
                   }
                 />
                 <Route path="/students" element={<StudentsPage />} />
+                <Route path="/quick-search" element={<StudentQuickSearchPage />} />
                 
                 {/* Admin Only Protected Routes */}
                 <Route

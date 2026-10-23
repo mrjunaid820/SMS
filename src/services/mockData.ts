@@ -18,6 +18,8 @@ import {
   Mark,
   SchoolSettings,
   AuditLog,
+  Quiz,
+  QuizMark,
 } from '@/types/database';
 
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
@@ -677,5 +679,145 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
     details: { receipt_no: 'REC-202610-0001', amount: 5000, method: 'Bank Transfer' },
     ip_address: '192.168.1.10',
     created_at: '2026-10-08T10:00:00Z',
+  },
+];
+
+// -------------------------------------------------------------
+// QUIZZES & CLASSROOM ASSESSMENTS
+// -------------------------------------------------------------
+export const INITIAL_QUIZZES: Quiz[] = [
+  {
+    id: 'q0000000-0000-0000-0000-000000000001',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002', // 2025-2026
+    class_id: 'c0000000-0000-0000-0000-000000000004', // Class 9
+    section_id: 'd0000000-0000-0000-0000-000000000001', // Section A
+    subject_id: 'e0000000-0000-0000-0000-000000000004', // Mathematics Science
+    title: 'Quiz 1: Algebraic Formulas & Factorization',
+    assessment_date: '2025-05-15',
+    max_marks: 25,
+    created_by: 'u0000000-0000-0000-0000-000000000002', // Teacher Tariq
+    created_at: '2025-05-10T10:00:00Z',
+  },
+  {
+    id: 'q0000000-0000-0000-0000-000000000002',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002', // 2025-2026
+    class_id: 'c0000000-0000-0000-0000-000000000004', // Class 9
+    section_id: 'd0000000-0000-0000-0000-000000000001', // Section A
+    subject_id: 'e0000000-0000-0000-0000-000000000001', // English Compulsory
+    title: 'Monthly Test: Tenses & Active/Passive Voice',
+    assessment_date: '2025-06-20',
+    max_marks: 20,
+    created_by: 'u0000000-0000-0000-0000-000000000002',
+    created_at: '2025-06-15T09:00:00Z',
+  },
+  {
+    id: 'q0000000-0000-0000-0000-000000000003',
+    academic_session_id: 'b0000000-0000-0000-0000-000000000002', // 2025-2026
+    class_id: 'c0000000-0000-0000-0000-000000000004', // Class 9
+    section_id: 'd0000000-0000-0000-0000-000000000001', // Section A
+    subject_id: 'e0000000-0000-0000-0000-000000000004', // Mathematics Science
+    title: 'Quiz 2: Matrices & Determinants',
+    assessment_date: '2025-09-18',
+    max_marks: 25,
+    created_by: 'u0000000-0000-0000-0000-000000000002',
+    created_at: '2025-09-12T11:00:00Z',
+  },
+];
+
+export const INITIAL_QUIZ_MARKS: QuizMark[] = [
+  // Quiz 1 Marks
+  {
+    id: 'qm000000-0000-0000-0000-000000000001',
+    quiz_id: 'q0000000-0000-0000-0000-000000000001',
+    enrollment_id: '20000000-0000-0000-0000-000000000001', // Hamza Khan (Roll 1)
+    marks_obtained: 23,
+    is_absent: false,
+    remarks: 'Excellent concept clarity',
+    created_at: '2025-05-16T12:00:00Z',
+    updated_at: '2025-05-16T12:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000002',
+    quiz_id: 'q0000000-0000-0000-0000-000000000001',
+    enrollment_id: '20000000-0000-0000-0000-000000000002', // Fatima Zahra (Roll 2)
+    marks_obtained: 21.5,
+    is_absent: false,
+    remarks: 'Good effort, minor arithmetic slip',
+    created_at: '2025-05-16T12:00:00Z',
+    updated_at: '2025-05-16T12:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000003',
+    quiz_id: 'q0000000-0000-0000-0000-000000000001',
+    enrollment_id: '20000000-0000-0000-0000-000000000003', // Ali Hassan Raza (Roll 3)
+    marks_obtained: 18,
+    is_absent: false,
+    remarks: 'Review quadratic factoring formula',
+    created_at: '2025-05-16T12:00:00Z',
+    updated_at: '2025-05-16T12:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000004',
+    quiz_id: 'q0000000-0000-0000-0000-000000000001',
+    enrollment_id: '20000000-0000-0000-0000-000000000004', // Zainab Bibi (Roll 4)
+    marks_obtained: undefined,
+    is_absent: true,
+    remarks: 'Medical leave on assessment day',
+    created_at: '2025-05-16T12:00:00Z',
+    updated_at: '2025-05-16T12:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000005',
+    quiz_id: 'q0000000-0000-0000-0000-000000000001',
+    enrollment_id: '20000000-0000-0000-0000-000000000005', // Bilal Ahmed Sheikh (Roll 5)
+    marks_obtained: 16,
+    is_absent: false,
+    remarks: 'Satisfactory, practice required',
+    created_at: '2025-05-16T12:00:00Z',
+    updated_at: '2025-05-16T12:00:00Z',
+  },
+
+  // Quiz 2 Marks
+  {
+    id: 'qm000000-0000-0000-0000-000000000006',
+    quiz_id: 'q0000000-0000-0000-0000-000000000002',
+    enrollment_id: '20000000-0000-0000-0000-000000000001', // Hamza Khan
+    marks_obtained: 18.5,
+    is_absent: false,
+    remarks: 'Very good grammar structure',
+    created_at: '2025-06-21T10:00:00Z',
+    updated_at: '2025-06-21T10:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000007',
+    quiz_id: 'q0000000-0000-0000-0000-000000000002',
+    enrollment_id: '20000000-0000-0000-0000-000000000002', // Fatima Zahra
+    marks_obtained: 19.5,
+    is_absent: false,
+    remarks: 'Near perfect essay section',
+    created_at: '2025-06-21T10:00:00Z',
+    updated_at: '2025-06-21T10:00:00Z',
+  },
+
+  // Quiz 3 Marks
+  {
+    id: 'qm000000-0000-0000-0000-000000000008',
+    quiz_id: 'q0000000-0000-0000-0000-000000000003',
+    enrollment_id: '20000000-0000-0000-0000-000000000001', // Hamza Khan
+    marks_obtained: 24,
+    is_absent: false,
+    remarks: 'Outstanding solution for inverse matrix',
+    created_at: '2025-09-19T14:00:00Z',
+    updated_at: '2025-09-19T14:00:00Z',
+  },
+  {
+    id: 'qm000000-0000-0000-0000-000000000009',
+    quiz_id: 'q0000000-0000-0000-0000-000000000003',
+    enrollment_id: '20000000-0000-0000-0000-000000000002', // Fatima Zahra
+    marks_obtained: 22.5,
+    is_absent: false,
+    remarks: 'Well-structured matrix multiplication',
+    created_at: '2025-09-19T14:00:00Z',
+    updated_at: '2025-09-19T14:00:00Z',
   },
 ];

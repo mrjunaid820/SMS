@@ -21,6 +21,10 @@ import {
   Mark,
   SchoolSettings,
   AuditLog,
+  Quiz,
+  QuizMark,
+  StudentSearchResult,
+  StudentAcademicSummary,
 } from '@/types/database';
 import {
   INITIAL_SCHOOL_SETTINGS,
@@ -41,8 +45,10 @@ import {
   INITIAL_EXAM_SUBJECTS,
   INITIAL_MARKS,
   INITIAL_AUDIT_LOGS,
+  INITIAL_QUIZZES,
+  INITIAL_QUIZ_MARKS,
 } from './mockData';
-import { generateUUID } from '@/lib/utils';
+import { generateUUID, calculateGrade, calculateAttendancePercentage } from '@/lib/utils';
 
 // Helper to get or initialize persistent local state
 function getStorage<T>(key: string, initial: T): T {
@@ -995,6 +1001,21 @@ export const attendanceApi = {
     await logAudit(actor || {}, 'ATTENDANCE_BATCH_RECORDED', 'attendance', date, { count: records.length });
     return updatedList.filter(a => a.date === date);
   },
+
+  getAttendanceByEnrollment: async (enrollmentId: string): Promise<AttendanceRecord[]> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('enrollment_id', enrollmentId)
+        .order('date', { ascending: false });
+      if (!error && data) return data;
+    }
+    const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
+    return attendance
+      .filter(a => a.enrollment_id === enrollmentId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
 };
 
 // -------------------------------------------------------------
@@ -1490,6 +1511,536 @@ export const userApi = {
       message: newTemporaryPassword
         ? `Temporary password successfully assigned for ${targetProfile.full_name}. Active sessions revoked.`
         : `Authorized password reset link dispatched to ${targetProfile.email}.`,
+    };
+  },
+};
+
+// -------------------------------------------------------------
+// 11. QUIZZES & CLASSROOM ASSESSMENTS
+// -------------------------------------------------------------
+export const quizApi = {
+  getQuizzes: async (
+    filters?: { sessionId?: string; classId?: string; sectionId?: string; subjectId?: string },
+    actor?: { id?: string; role?: string; email?: string }
+  ): Promise<Quiz[]> => {
+    let quizzes: Quiz[] = [];
+    if (isLiveSupabaseConfigured()) {
+      let query = supabase
+        .from('quizzes')
+        .select('*, class:classes(*), section:sections(*), subject:subjects(*), academic_session:academic_sessions(*)')
+        .order('assessment_date', { ascending: false });
+      if (filters?.sessionId) query = query.eq('academic_session_id', filters.sessionId);
+      if (filters?.classId) query = query.eq('class_id', filters.classId);
+      if (filters?.sectionId) query = query.eq('section_id', filters.sectionId);
+      if (filters?.subjectId) query = query.eq('subject_id', filters.subjectId);
+      const { data, error } = await query;
+      if (!error && data) quizzes = data;
+    } else {
+      const allQuizzes = getStorage<Quiz[]>('quizzes', INITIAL_QUIZZES);
+      const classes = await academicStructureApi.getClasses();
+      const sections = await academicStructureApi.getSections();
+      const subjects = await academicStructureApi.getSubjects();
+      const sessions = await settingsApi.getSessions();
+
+      quizzes = allQuizzes
+        .filter((q) => {
+          if (filters?.sessionId && q.academic_session_id !== filters.sessionId) return false;
+          if (filters?.classId && q.class_id !== filters.classId) return false;
+          if (filters?.sectionId && q.section_id !== filters.sectionId) return false;
+          if (filters?.subjectId && q.subject_id !== filters.subjectId) return false;
+          return true;
+        })
+        .map((q) => ({
+          ...q,
+          class: classes.find((c) => c.id === q.class_id),
+          section: sections.find((s) => s.id === q.section_id),
+          subject: subjects.find((s) => s.id === q.subject_id),
+          academic_session: sessions.find((ses) => ses.id === q.academic_session_id),
+        }))
+        .sort((a, b) => new Date(b.assessment_date).getTime() - new Date(a.assessment_date).getTime());
+    }
+
+    // Role scoping for teachers
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) return [];
+
+      const assignments = await teacherApi.getAssignments(filters?.sessionId);
+      const teacherAssignments = assignments.filter((a) => a.teacher_id === currentTeacher.id);
+      const assignedSectionIds = new Set(teacherAssignments.map((a) => a.section_id));
+
+      return quizzes.filter((q) => assignedSectionIds.has(q.section_id));
+    }
+
+    return quizzes;
+  },
+
+  getQuizById: async (id: string): Promise<Quiz | null> => {
+    const quizzes = await quizApi.getQuizzes();
+    return quizzes.find((q) => q.id === id) || null;
+  },
+
+  createQuiz: async (
+    quiz: Omit<Quiz, 'id' | 'created_at'>,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<Quiz> => {
+    if (!quiz.title || !quiz.title.trim()) {
+      throw new Error('Validation Error: Quiz title is required.');
+    }
+    if (!quiz.assessment_date) {
+      throw new Error('Validation Error: Assessment date is required.');
+    }
+    if (!quiz.max_marks || Number(quiz.max_marks) <= 0) {
+      throw new Error('Validation Error: Maximum marks must be greater than zero.');
+    }
+
+    // Teacher authorization check
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher profile record not found.');
+      }
+      const assignments = await teacherApi.getAssignments(quiz.academic_session_id);
+      const isAssigned = assignments.some(
+        (a) => a.teacher_id === currentTeacher.id && a.section_id === quiz.section_id && a.subject_id === quiz.subject_id
+      );
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You are not authorized to create quizzes for unassigned classes or subjects.');
+      }
+    }
+
+    const newQuiz: Quiz = {
+      ...quiz,
+      id: generateUUID(),
+      max_marks: Number(quiz.max_marks),
+      created_by: actor?.id,
+      created_at: new Date().toISOString(),
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('quizzes').insert([newQuiz]).select().single();
+      if (error) throw error;
+      await logAudit(actor || {}, 'QUIZ_CREATED', 'quizzes', data.id, { title: quiz.title, max_marks: quiz.max_marks });
+      return data;
+    }
+
+    const quizzes = getStorage<Quiz[]>('quizzes', INITIAL_QUIZZES);
+    setStorage('quizzes', [newQuiz, ...quizzes]);
+    await logAudit(actor || {}, 'QUIZ_CREATED', 'quizzes', newQuiz.id, { title: quiz.title, max_marks: quiz.max_marks });
+    return newQuiz;
+  },
+
+  getQuizMarks: async (quizId: string): Promise<QuizMark[]> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('quiz_marks')
+        .select('*, enrollment:enrollments(*, student:students(*)), quiz:quizzes(*)')
+        .eq('quiz_id', quizId);
+      if (!error && data) return data;
+    }
+
+    const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
+    const enrollments = await studentApi.getEnrollments();
+    const quizzes = await quizApi.getQuizzes();
+
+    return allMarks
+      .filter((m) => m.quiz_id === quizId)
+      .map((m) => ({
+        ...m,
+        enrollment: enrollments.find((e) => e.id === m.enrollment_id),
+        quiz: quizzes.find((q) => q.id === m.quiz_id),
+      }));
+  },
+
+  getStudentQuizMarks: async (enrollmentId: string): Promise<(QuizMark & { quiz: Quiz })[]> => {
+    const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
+    const quizzes = await quizApi.getQuizzes();
+
+    return allMarks
+      .filter((m) => m.enrollment_id === enrollmentId)
+      .map((m) => {
+        const quiz = quizzes.find((q) => q.id === m.quiz_id);
+        return {
+          ...m,
+          quiz: quiz!,
+        };
+      })
+      .filter((m) => Boolean(m.quiz));
+  },
+
+  saveQuizMarksBatch: async (
+    quizId: string,
+    marksData: { enrollment_id: string; marks_obtained?: number; is_absent: boolean; remarks?: string }[],
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<void> => {
+    const quiz = await quizApi.getQuizById(quizId);
+    if (!quiz) throw new Error('Quiz not found.');
+
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher profile record not found.');
+      }
+      const assignments = await teacherApi.getAssignments(quiz.academic_session_id);
+      const isAssigned = assignments.some(
+        (a) => a.teacher_id === currentTeacher.id && a.section_id === quiz.section_id
+      );
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You are not authorized to grade quizzes for this section.');
+      }
+    }
+
+    // Validation
+    marksData.forEach((item) => {
+      if (!item.is_absent) {
+        if (item.marks_obtained === undefined || item.marks_obtained === null || isNaN(Number(item.marks_obtained))) {
+          throw new Error('Validation Error: Obtained marks are required when student is present.');
+        }
+        if (Number(item.marks_obtained) < 0) {
+          throw new Error('Validation Error: Obtained marks cannot be negative.');
+        }
+        if (Number(item.marks_obtained) > Number(quiz.max_marks)) {
+          throw new Error(
+            `Validation Error: Obtained marks (${item.marks_obtained}) cannot exceed maximum marks (${quiz.max_marks}).`
+          );
+        }
+      }
+    });
+
+    if (isLiveSupabaseConfigured()) {
+      const payload = marksData.map((item) => ({
+        quiz_id: quizId,
+        enrollment_id: item.enrollment_id,
+        marks_obtained: item.is_absent ? null : Number(item.marks_obtained),
+        is_absent: item.is_absent,
+        remarks: item.remarks,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('quiz_marks').upsert(payload, { onConflict: 'quiz_id, enrollment_id' });
+      if (error) throw error;
+      await logAudit(actor || {}, 'QUIZ_MARKS_ENTERED', 'quiz_marks', quizId, { count: marksData.length });
+      return;
+    }
+
+    const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
+    const updated = [...allMarks];
+
+    marksData.forEach((item) => {
+      const idx = updated.findIndex((m) => m.quiz_id === quizId && m.enrollment_id === item.enrollment_id);
+      if (idx !== -1) {
+        updated[idx] = {
+          ...updated[idx],
+          marks_obtained: item.is_absent ? undefined : Number(item.marks_obtained),
+          is_absent: item.is_absent,
+          remarks: item.remarks,
+          updated_at: new Date().toISOString(),
+        };
+      } else {
+        updated.push({
+          id: generateUUID(),
+          quiz_id: quizId,
+          enrollment_id: item.enrollment_id,
+          marks_obtained: item.is_absent ? undefined : Number(item.marks_obtained),
+          is_absent: item.is_absent,
+          remarks: item.remarks,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    setStorage('quiz_marks', updated);
+    await logAudit(actor || {}, 'QUIZ_MARKS_ENTERED', 'quiz_marks', quizId, { count: marksData.length });
+  },
+};
+
+// -------------------------------------------------------------
+// 12. STUDENT QUICK SEARCH & ACADEMIC DOSSIER
+// -------------------------------------------------------------
+export const studentSearchApi = {
+  searchStudents: async (
+    params: { query?: string; classId?: string; sectionId?: string; sessionId?: string },
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<StudentSearchResult[]> => {
+    const sessionId = params.sessionId || (await settingsApi.getSessions()).find((s) => s.is_current)?.id;
+    const enrollments = await studentApi.getEnrollments(sessionId);
+    const students = await studentApi.getStudents(false);
+    const classes = await academicStructureApi.getClasses();
+    const sections = await academicStructureApi.getSections();
+
+    // 1. Determine authorized section scope
+    let authorizedSectionIds: Set<string> | null = null;
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) return [];
+
+      const assignments = await teacherApi.getAssignments(sessionId);
+      const teacherAssignments = assignments.filter((a) => a.teacher_id === currentTeacher.id);
+      authorizedSectionIds = new Set(teacherAssignments.map((a) => a.section_id));
+
+      if (authorizedSectionIds.size === 0) return [];
+    }
+
+    // 2. Filter enrollments by class, section, and authorized scope
+    const filteredEnrollments = enrollments.filter((enr) => {
+      if (authorizedSectionIds && !authorizedSectionIds.has(enr.section_id)) {
+        return false;
+      }
+      if (params.sectionId && enr.section_id !== params.sectionId) {
+        return false;
+      }
+      if (params.classId) {
+        const sec = sections.find((s) => s.id === enr.section_id);
+        if (!sec || sec.class_id !== params.classId) return false;
+      }
+      return true;
+    });
+
+    // 3. Search query filter
+    const q = params.query?.trim().toLowerCase() || '';
+
+    const results: StudentSearchResult[] = [];
+
+    for (const enr of filteredEnrollments) {
+      const student = students.find((s) => s.id === enr.student_id);
+      if (!student) continue;
+
+      const sec = sections.find((s) => s.id === enr.section_id);
+      const cls = sec ? classes.find((c) => c.id === sec.class_id) : undefined;
+
+      const populatedEnrollment = {
+        ...enr,
+        section: sec ? { ...sec, class: cls } : undefined,
+      };
+
+      if (!q) {
+        results.push({ student, enrollment: populatedEnrollment });
+        continue;
+      }
+
+      const matchName = student.full_name.toLowerCase().includes(q);
+      const matchAdmission = student.admission_no.toLowerCase().includes(q);
+      const matchRoll = enr.roll_no ? String(enr.roll_no) === q || `roll ${enr.roll_no}`.includes(q) : false;
+      const matchClassName = cls?.name.toLowerCase().includes(q);
+      const matchSectionName = sec?.name.toLowerCase().includes(q);
+
+      if (matchName || matchAdmission || matchRoll || matchClassName || matchSectionName) {
+        results.push({ student, enrollment: populatedEnrollment });
+      }
+    }
+
+    return results.sort((a, b) => {
+      const clsA = a.enrollment?.section?.class?.numeric_order ?? 99;
+      const clsB = b.enrollment?.section?.class?.numeric_order ?? 99;
+      if (clsA !== clsB) return clsA - clsB;
+      const rollA = a.enrollment?.roll_no ?? 999;
+      const rollB = b.enrollment?.roll_no ?? 999;
+      return rollA - rollB;
+    });
+  },
+
+  getStudentAcademicSummary: async (
+    studentId: string,
+    sessionId?: string,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<StudentAcademicSummary> => {
+    const student = await studentApi.getStudentById(studentId);
+    if (!student) throw new Error('Student record not found.');
+
+    const sessions = await settingsApi.getSessions();
+    const activeSession = sessionId
+      ? sessions.find((s) => s.id === sessionId)
+      : sessions.find((s) => s.is_current) || sessions[0];
+    const targetSessionId = activeSession?.id;
+
+    const enrollments = await studentApi.getEnrollments(targetSessionId);
+    const enrollment = enrollments.find((e) => e.student_id === studentId);
+
+    // 1. Enforce Teacher Scoping Check
+    if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (!currentTeacher) {
+        throw new Error('Unauthorized: Teacher account profile not found.');
+      }
+      const assignments = await teacherApi.getAssignments(targetSessionId);
+      const isAssigned =
+        enrollment &&
+        assignments.some((a) => a.teacher_id === currentTeacher.id && a.section_id === enrollment.section_id);
+      if (!isAssigned) {
+        throw new Error('Unauthorized: You do not have permission to view academic records for unassigned students.');
+      }
+    }
+
+    // 2. Attendance Analytics
+    let attendanceSummary = {
+      total: 0,
+      present: 0,
+      absent: 0,
+      late: 0,
+      leave: 0,
+      percentage: 0,
+      history: [] as AttendanceRecord[],
+    };
+
+    if (enrollment) {
+      const attendanceRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
+      const present = attendanceRecords.filter((r) => r.status === 'Present').length;
+      const absent = attendanceRecords.filter((r) => r.status === 'Absent').length;
+      const late = attendanceRecords.filter((r) => r.status === 'Late').length;
+      const leave = attendanceRecords.filter((r) => r.status === 'Leave').length;
+      const total = attendanceRecords.length;
+      const percentage = calculateAttendancePercentage(present + late, total);
+
+      attendanceSummary = {
+        total,
+        present,
+        absent,
+        late,
+        leave,
+        percentage,
+        history: attendanceRecords,
+      };
+    }
+
+    // 3. Examination Results
+    const examResults: StudentAcademicSummary['exams'] = [];
+    if (enrollment) {
+      const exams = await examApi.getExams(targetSessionId);
+      const subjects = await academicStructureApi.getSubjects();
+
+      for (const exam of exams) {
+        const examSubjects = await examApi.getExamSubjects(exam.id, enrollment.section?.class_id);
+        for (const es of examSubjects) {
+          const marks = await examApi.getMarks(es.id);
+          const studentMark = marks.find((m) => m.enrollment_id === enrollment.id);
+          if (studentMark) {
+            const subj = subjects.find((s) => s.id === es.subject_id);
+            const isAbsent = Boolean(studentMark.is_absent);
+            const obtained = studentMark.marks_obtained;
+            const pct =
+              !isAbsent && obtained !== undefined ? Math.round((obtained / es.max_marks) * 100 * 10) / 10 : undefined;
+            const grade = isAbsent ? 'Absent' : pct !== undefined ? calculateGrade(pct).grade : 'N/A';
+
+            examResults.push({
+              exam_id: exam.id,
+              exam_name: exam.name,
+              subject_id: es.subject_id,
+              subject_name: subj?.name || es.subject?.name || 'Subject',
+              marks_obtained: obtained,
+              max_marks: es.max_marks,
+              percentage: pct,
+              grade,
+              is_absent: isAbsent,
+              remarks: studentMark.remarks,
+              exam_date: es.exam_date,
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Quizzes & Classroom Assessments
+    const quizResults: StudentAcademicSummary['quizzes'] = [];
+    if (enrollment) {
+      const quizzes = await quizApi.getQuizzes({ sessionId: targetSessionId, sectionId: enrollment.section_id });
+      for (const q of quizzes) {
+        const qMarks = await quizApi.getQuizMarks(q.id);
+        const studentQMark = qMarks.find((m) => m.enrollment_id === enrollment.id);
+        if (studentQMark) {
+          const isAbsent = Boolean(studentQMark.is_absent);
+          const obtained = studentQMark.marks_obtained;
+          const pct =
+            !isAbsent && obtained !== undefined ? Math.round((obtained / q.max_marks) * 100 * 10) / 10 : undefined;
+
+          quizResults.push({
+            quiz_id: q.id,
+            title: q.title,
+            subject_name: q.subject?.name || 'Class Subject',
+            assessment_date: q.assessment_date,
+            marks_obtained: obtained,
+            max_marks: q.max_marks,
+            percentage: pct,
+            is_absent: isAbsent,
+            remarks: studentQMark.remarks,
+          });
+        }
+      }
+    }
+
+    // 5. Fee Ledger (Admin Only - Teachers Strictly Excluded)
+    let feeSummary: StudentAcademicSummary['fees'] = null;
+    if (actor?.role === 'admin' && enrollment) {
+      const invoices = await feeApi.getInvoices(targetSessionId);
+      const studentInvoices = invoices.filter((i) => i.enrollment_id === enrollment.id);
+      const totalInvoiced = studentInvoices.reduce((sum, inv) => sum + Number(inv.net_amount), 0);
+      const totalPaid = studentInvoices.reduce((sum, inv) => sum + Number(inv.paid_amount), 0);
+      const outstanding = Math.max(0, totalInvoiced - totalPaid);
+
+      const hasOverdue = studentInvoices.some((i) => i.status === 'Overdue');
+      const status: 'Paid' | 'Partially Paid' | 'Unpaid' | 'Overdue' =
+        outstanding === 0 ? 'Paid' : hasOverdue ? 'Overdue' : totalPaid > 0 ? 'Partially Paid' : 'Unpaid';
+
+      feeSummary = {
+        total_invoiced: totalInvoiced,
+        total_paid: totalPaid,
+        outstanding_balance: outstanding,
+        status,
+        invoices: studentInvoices,
+      };
+    }
+
+    // 6. Chronological Performance Trend (Quizzes + Exams)
+    const trendItems: StudentAcademicSummary['performanceTrend'] = [];
+
+    quizResults.forEach((q) => {
+      if (!q.is_absent && q.percentage !== undefined) {
+        trendItems.push({
+          date: q.assessment_date,
+          title: q.title,
+          subject: q.subject_name,
+          type: 'Quiz',
+          percentage: q.percentage,
+        });
+      }
+    });
+
+    examResults.forEach((e) => {
+      if (!e.is_absent && e.percentage !== undefined && e.exam_date) {
+        trendItems.push({
+          date: e.exam_date,
+          title: `${e.exam_name} - ${e.subject_name}`,
+          subject: e.subject_name,
+          type: 'Exam',
+          percentage: e.percentage,
+        });
+      }
+    });
+
+    trendItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    return {
+      student,
+      enrollment,
+      attendance: attendanceSummary,
+      exams: examResults,
+      quizzes: quizResults,
+      fees: feeSummary,
+      performanceTrend: trendItems,
     };
   },
 };

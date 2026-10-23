@@ -21,10 +21,12 @@ import {
   ShieldAlert,
   Sliders,
   UserCog,
+  Search,
 } from 'lucide-react';
 
 const iconMap: Record<string, React.ReactNode> = {
   LayoutDashboard: <LayoutDashboard className="w-4 h-4 shrink-0" />,
+  Search: <Search className="w-4 h-4 shrink-0" />,
   GraduationCap: <GraduationCap className="w-4 h-4 shrink-0" />,
   Users: <Users className="w-4 h-4 shrink-0" />,
   CalendarRange: <CalendarRange className="w-4 h-4 shrink-0" />,
