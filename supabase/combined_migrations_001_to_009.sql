@@ -1611,6 +1611,11 @@ CREATE POLICY "Students can update own photo_url"
 CREATE OR REPLACE FUNCTION public.enforce_student_photo_only_update()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Direct database operations, migrations, and service_role (auth.uid() IS NULL) have full authority
+    IF auth.uid() IS NULL THEN
+        RETURN NEW;
+    END IF;
+
     -- Administrators retain full administrative update authority
     IF public.is_admin() THEN
         RETURN NEW;
