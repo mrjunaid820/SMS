@@ -1,25 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { studentPortalApi, studentApi } from '@/services/api';
+import { studentPortalApi } from '@/services/api';
 import { Student, Enrollment } from '@/types/database';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/common/Card';
 import { Badge } from '@/components/common/Badge';
-import { Input } from '@/components/common/Input';
 import { Button } from '@/components/common/Button';
 import { formatDate } from '@/lib/utils';
 import {
   UserCheck,
   Shield,
-  KeyRound,
-  Lock,
-  Phone,
+  ShieldCheck,
   Home,
   AlertCircle,
   CheckCircle2,
-  Calendar,
   GraduationCap,
-  CreditCard,
   Info,
+  Camera,
+  User,
+  Mail,
+  Hash,
+  School,
 } from 'lucide-react';
 
 export const MyProfilePage: React.FC = () => {
@@ -29,12 +29,11 @@ export const MyProfilePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Password Update State
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  // Avatar Upload State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarSuccess, setAvatarSuccess] = useState<string | null>(null);
 
   const loadProfile = async () => {
     setIsLoading(true);
@@ -55,35 +54,48 @@ export const MyProfilePage: React.FC = () => {
     loadProfile();
   }, [user]);
 
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordError(null);
-    setPasswordSuccess(null);
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    if (!newPassword || newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters in length.');
+    setAvatarError(null);
+    setAvatarSuccess(null);
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type)) {
+      setAvatarError('Please upload a valid image file (JPG, PNG, WEBP, or GIF).');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Passwords do not match. Please re-enter your new password.');
+
+    // Validate file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setAvatarError('Image file size exceeds the 5MB limit. Please choose a smaller file.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
-    if (!student) return;
 
-    setPasswordLoading(true);
+    setIsUploadingAvatar(true);
     try {
-      await studentApi.resetStudentPassword(
-        student.id,
-        newPassword,
-        { id: user?.id, name: user?.full_name, role: user?.role }
-      );
-      setPasswordSuccess('Your portal password has been updated successfully.');
-      setNewPassword('');
-      setConfirmPassword('');
+      const identifier = user?.id || user?.email || '';
+      const result = await studentPortalApi.updateMyAvatar(identifier, file, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+
+      // Update student state immediately with the new photo_url
+      setStudent((prev) => (prev ? { ...prev, photo_url: result.photo_url } : null));
+      setAvatarSuccess('Profile picture updated successfully!');
     } catch (err: any) {
-      setPasswordError(err.message || 'Failed to update password.');
+      setAvatarError(err.message || 'Failed to update profile picture. Please try again.');
     } finally {
-      setPasswordLoading(false);
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -112,16 +124,25 @@ export const MyProfilePage: React.FC = () => {
     );
   }
 
+  // Generate initials for avatar fallback if photo is not set
+  const initials = student.full_name
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'ST';
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
+      {/* Page Title & Status Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-            My Student Profile & Credentials
+            My Student Profile
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Verified institutional identity, enrollment details, and account security
+            Institutional identity, verified enrollment details, and official photo
           </p>
         </div>
 
@@ -131,11 +152,111 @@ export const MyProfilePage: React.FC = () => {
         </Badge>
       </div>
 
+      {/* Profile Picture & Identity Showcase Card */}
+      <Card className="overflow-hidden border-brand-100 dark:border-slate-800 bg-gradient-to-r from-brand-50/40 via-white to-blue-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
+        <CardContent className="p-6">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+            {/* Avatar Preview & Upload Trigger */}
+            <div className="relative group shrink-0">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-white dark:border-slate-800 shadow-md ring-2 ring-brand-500/20 overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                {student.photo_url ? (
+                  <img
+                    src={student.photo_url}
+                    alt={student.full_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-brand-500 to-indigo-600 text-white font-bold text-2xl tracking-wider select-none">
+                    {initials}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick overlay camera icon */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploadingAvatar}
+                title="Change student photo"
+                className="absolute bottom-0 right-0 p-2 rounded-full bg-brand-600 text-white shadow-md hover:bg-brand-700 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 disabled:opacity-50"
+              >
+                <Camera className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Profile Overview & Avatar Management Controls */}
+            <div className="flex-1 text-center sm:text-left space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100">
+                    {student.full_name}
+                  </h2>
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-1">
+                    <span className="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-md bg-brand-100 text-brand-800 dark:bg-brand-950 dark:text-brand-300 font-semibold">
+                      <Hash className="w-3 h-3" />
+                      {student.admission_no}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-medium">
+                      <School className="w-3 h-3" />
+                      {enrollment?.section?.class?.name || 'Class 9'} ({enrollment?.section?.name || 'A'})
+                    </span>
+                    <Badge variant="success" size="sm">
+                      Roll #{enrollment?.roll_no || '1'}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:items-end gap-1">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    onChange={handleAvatarChange}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    isLoading={isUploadingAvatar}
+                    className="w-full sm:w-auto shadow-xs"
+                  >
+                    <Camera className="w-3.5 h-3.5 mr-1.5" />
+                    {student.photo_url ? 'Change Photo' : 'Upload Photo'}
+                  </Button>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Accepts JPG, PNG, WEBP, or GIF (max 5 MB). This official image is displayed on your Student ID Card and examination reports.
+              </p>
+
+              {/* Upload Success Alert */}
+              {avatarSuccess && (
+                <div className="mt-2 p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-200 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>{avatarSuccess}</span>
+                </div>
+              )}
+
+              {/* Upload Error Alert */}
+              {avatarError && (
+                <div className="mt-2 p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex items-center gap-2 text-xs text-rose-800 dark:text-rose-200 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>{avatarError}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Advisory Banner */}
       <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 flex items-start gap-3">
         <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
         <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-          <span className="font-semibold">Official Record Notice:</span> Academic, personal, and guardian enrollment data are certified by the institutional registrar and are read-only in this portal. For corrections to names, birth dates, or guardian information, please contact the school administration office.
+          <span className="font-semibold">Official Record Notice:</span> Academic, personal, and guardian enrollment data are certified by the institutional registrar and are strictly read-only in this portal. For official corrections to names, birth dates, or guardian information, please contact the school administration office.
         </div>
       </div>
 
@@ -224,7 +345,7 @@ export const MyProfilePage: React.FC = () => {
         </Card>
       </div>
 
-      {/* Grid: Guardian Contacts & Security Password Change */}
+      {/* Grid: Guardian Contacts & Institutional Record Info */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Guardian & Contact Information */}
         <Card>
@@ -260,75 +381,48 @@ export const MyProfilePage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Account Credentials & Self-Service Password Change */}
+        {/* Institutional Record & Verification Status */}
         <Card>
           <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
             <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-brand-600" />
-              Portal Account & Security
+              <ShieldCheck className="w-4 h-4 text-brand-600" />
+              Institutional Record & Support
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-4 space-y-4 text-xs">
-            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Portal Login Email:</span>
+            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Student Portal ID:</span>
                 <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
+                  {student.id.slice(0, 8)}...
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Portal Login Email:</span>
+                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
                   {student.email || user?.email || 'N/A'}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-slate-500">Account Access:</span>
                 <Badge variant="success" size="sm">
-                  Active
+                  Active & Verified
                 </Badge>
               </div>
             </div>
 
-            {passwordError && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
-                {passwordError}
+            <div className="text-slate-600 dark:text-slate-400 space-y-2">
+              <p className="font-semibold text-slate-800 dark:text-slate-200">
+                Need to update official student records or credentials?
+              </p>
+              <p className="leading-relaxed">
+                For administrative security and integrity, official student records (including names, dates of birth, B-Form/CNIC, and guardian phone numbers) can only be amended by the school administration office. Passwords are also securely managed by administrators.
+              </p>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
+                <div>• <span className="font-medium text-slate-700 dark:text-slate-300">Registrar Office:</span> Admin Block, Ground Floor</div>
+                <div>• <span className="font-medium text-slate-700 dark:text-slate-300">Office Timings:</span> Monday – Friday, 8:00 AM – 2:00 PM</div>
               </div>
-            )}
-
-            {passwordSuccess && (
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                {passwordSuccess}
-              </div>
-            )}
-
-            <form onSubmit={handleUpdatePassword} className="space-y-3 pt-2">
-              <h4 className="font-semibold text-slate-900 dark:text-slate-100">
-                Change Portal Password
-              </h4>
-
-              <Input
-                label="New Password"
-                type="password"
-                required
-                placeholder="Enter new password (min 6 chars)"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-
-              <Input
-                label="Confirm New Password"
-                type="password"
-                required
-                placeholder="Re-enter new password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-
-              <Button
-                type="submit"
-                size="sm"
-                className="w-full mt-2"
-                isLoading={passwordLoading}
-                disabled={!newPassword || newPassword.length < 6}
-              >
-                Update Password
-              </Button>
-            </form>
+            </div>
           </CardContent>
         </Card>
       </div>

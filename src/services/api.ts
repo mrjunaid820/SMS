@@ -3025,6 +3025,110 @@ export const studentPortalApi = {
       paymentHistory: payments,
     };
   },
+
+  updateMyAvatar: async (
+    profileId: string,
+    fileOrUrl: File | string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ photo_url: string }> => {
+    const { student } = await studentPortalApi.getStudentSelf(profileId);
+    if (!student) {
+      throw new Error('Student record not found.');
+    }
+
+    // Authorization check: student can only update their own avatar; admins can update any student
+    if (actor) {
+      if (actor.role === 'admin') {
+        // Admin is authorized
+      } else if (actor.role === 'student') {
+        if (student.profile_id && actor.id !== student.profile_id && actor.id !== profileId) {
+          throw new Error('Unauthorized: Students can only update their own profile picture.');
+        }
+      } else {
+        throw new Error('Unauthorized: Only students or administrators are authorized to update profile pictures.');
+      }
+    }
+
+    let photoUrl = '';
+    if (typeof fileOrUrl === 'string') {
+      photoUrl = fileOrUrl.trim();
+    } else {
+      const file = fileOrUrl;
+      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (file.type && !validTypes.includes(file.type)) {
+        throw new Error('Invalid file format. Please upload a JPG, PNG, WEBP, or GIF image.');
+      }
+      const maxSize = 5 * 1024 * 1024; // 5 MB
+      if (file.size > maxSize) {
+        throw new Error('File size exceeds the 5MB limit. Please choose a smaller image.');
+      }
+
+      if (isLiveSupabaseConfigured()) {
+        const fileExt = file.name ? file.name.split('.').pop() || 'png' : 'png';
+        const fileName = `${student.id}-${Date.now()}.${fileExt}`;
+        const filePath = `avatars/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('student-avatars')
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload image: ${uploadError.message}`);
+        }
+
+        const { data: publicData } = supabase.storage
+          .from('student-avatars')
+          .getPublicUrl(filePath);
+
+        photoUrl = publicData.publicUrl;
+      } else {
+        // Local/mock environment fallback
+        if (typeof FileReader !== 'undefined') {
+          photoUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to read image file.'));
+            reader.readAsDataURL(file);
+          });
+        } else if (typeof (file as any).arrayBuffer === 'function') {
+          const buf = await (file as any).arrayBuffer();
+          const b64 = Buffer.from(buf).toString('base64');
+          photoUrl = `data:${file.type || 'image/png'};base64,${b64}`;
+        } else {
+          photoUrl = `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop`;
+        }
+      }
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { error: dbError } = await supabase
+        .from('students')
+        .update({ photo_url: photoUrl, updated_at: new Date().toISOString() })
+        .eq('id', student.id);
+
+      if (dbError) {
+        throw new Error(`Failed to update student profile photo: ${dbError.message}`);
+      }
+    }
+
+    // Update local storage in all modes to ensure local cache consistency
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const idx = students.findIndex((s) => s.id === student.id);
+    if (idx !== -1) {
+      students[idx] = { ...students[idx], photo_url: photoUrl, updated_at: new Date().toISOString() };
+      setStorage('students', [...students]);
+    }
+
+    await logAudit(
+      actor || { id: student.profile_id, name: student.full_name, role: 'student' },
+      'STUDENT_AVATAR_UPDATED',
+      'students',
+      student.id,
+      { previous: student.photo_url, updated: photoUrl }
+    );
+
+    return { photo_url: photoUrl };
+  },
 };
 
 

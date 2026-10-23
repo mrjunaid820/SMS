@@ -477,4 +477,167 @@ describe('Student Portal & Identity Architecture Verification', () => {
       expect(recorded?.amount).toBe(paymentAmount);
     });
   });
+
+  describe('9. Migration 009 & Profile Security Restrictions', () => {
+    const adminActor = { id: 'admin-id-1', name: 'Principal Admin', role: 'admin' };
+
+    it('verifies migration 009 exists with avatar storage policies, RLS, and tamper protection trigger', () => {
+      const migrationPath = path.resolve(__dirname, '../supabase/migrations/009_student_avatar_update_policy.sql');
+      expect(fs.existsSync(migrationPath)).toBe(true);
+      const sqlContent = fs.readFileSync(migrationPath, 'utf8');
+
+      // Storage bucket creation
+      expect(sqlContent).toContain("INSERT INTO storage.buckets (id, name, public)");
+      expect(sqlContent).toContain("'student-avatars'");
+
+      // Storage policies
+      expect(sqlContent).toContain('Public can view student avatars');
+      expect(sqlContent).toContain('Authenticated users can upload student avatars');
+      expect(sqlContent).toContain('Authenticated users can update student avatars');
+
+      // Table RLS policy
+      expect(sqlContent).toContain('Students can update own photo_url');
+      expect(sqlContent).toContain('profile_id = auth.uid()');
+
+      // Tamper-protection trigger & function
+      expect(sqlContent).toContain('enforce_student_photo_only_update()');
+      expect(sqlContent).toContain('trg_enforce_student_photo_only_update');
+      expect(sqlContent).toContain('OLD.full_name IS DISTINCT FROM NEW.full_name');
+      expect(sqlContent).toContain('OLD.date_of_birth IS DISTINCT FROM NEW.date_of_birth');
+      expect(sqlContent).toContain('OLD.guardian_name IS DISTINCT FROM NEW.guardian_name');
+      expect(sqlContent).toContain('OLD.guardian_phone IS DISTINCT FROM NEW.guardian_phone');
+      expect(sqlContent).toContain('OLD.b_form_or_cnic IS DISTINCT FROM NEW.b_form_or_cnic');
+      expect(sqlContent).toContain('Unauthorized: Students are only permitted to update their profile picture.');
+    });
+
+    it('allows student to upload and update their profile picture only', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students[0];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        targetStudent.id,
+        'avatar.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const studentActor = { id: profile.id, name: profile.full_name, role: 'student' };
+      const newAvatarUrl = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop';
+
+      // Update avatar
+      const updateResult = await studentPortalApi.updateMyAvatar(profile.id, newAvatarUrl, studentActor);
+      expect(updateResult.photo_url).toBe(newAvatarUrl);
+
+      // Verify profile reload reflects the updated photo_url
+      const selfData = await studentPortalApi.getStudentSelf(profile.id);
+      expect(selfData.student.photo_url).toBe(newAvatarUrl);
+    });
+
+    it('validates avatar file format and size limits', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students[0];
+
+      const { profile } = await studentApi.provisionStudentAccount(
+        targetStudent.id,
+        'validator.student@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const studentActor = { id: profile.id, name: profile.full_name, role: 'student' };
+
+      // Invalid mime type
+      const fakeDocFile = {
+        name: 'test.pdf',
+        type: 'application/pdf',
+        size: 1024,
+      } as any;
+
+      await expect(
+        studentPortalApi.updateMyAvatar(profile.id, fakeDocFile, studentActor)
+      ).rejects.toThrow('Invalid file format');
+
+      // Oversized file (> 5MB)
+      const oversizedFile = {
+        name: 'huge.jpg',
+        type: 'image/jpeg',
+        size: 6 * 1024 * 1024,
+      } as any;
+
+      await expect(
+        studentPortalApi.updateMyAvatar(profile.id, oversizedFile, studentActor)
+      ).rejects.toThrow('File size exceeds the 5MB limit');
+    });
+
+    it('prevents a student from updating another student avatar', async () => {
+      const students = await studentApi.getStudents();
+      const studentA = students[0];
+      const studentB = students[1];
+
+      const { profile: profileA } = await studentApi.provisionStudentAccount(
+        studentA.id,
+        'student.a.photo@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const { profile: profileB } = await studentApi.provisionStudentAccount(
+        studentB.id,
+        'student.b.photo@test.edu.pk',
+        'Pass123!',
+        adminActor
+      );
+
+      const actorA = { id: profileA.id, name: profileA.full_name, role: 'student' };
+
+      // Student A tries to update Student B's avatar
+      await expect(
+        studentPortalApi.updateMyAvatar(profileB.id, 'https://example.com/hacker.jpg', actorA)
+      ).rejects.toThrow('Unauthorized');
+    });
+
+    it('rejects student attempts to edit general student text/demographic fields', async () => {
+      const students = await studentApi.getStudents();
+      const target = students[0];
+
+      const studentActor = { id: 'some-student-id', name: 'Zeeshan Khan', role: 'student' };
+
+      // Attempting to alter name/guardian via studentApi.updateStudent must be rejected
+      await expect(
+        studentApi.updateStudent(target.id, { full_name: 'Hacked Name' }, studentActor)
+      ).rejects.toThrow('Unauthorized: Only administrators are authorized to edit student records.');
+    });
+
+    it('verifies MyProfilePage.tsx completely removes the password change form and security card', () => {
+      const profilePagePath = path.resolve(__dirname, '../src/pages/StudentPortal/MyProfilePage.tsx');
+      expect(fs.existsSync(profilePagePath)).toBe(true);
+      const content = fs.readFileSync(profilePagePath, 'utf8');
+
+      // Must NOT contain the old security card or password form
+      expect(content).not.toContain('Portal Account & Security');
+      expect(content).not.toContain('Change Portal Password');
+      expect(content).not.toContain('Update Password');
+      expect(content).not.toContain('newPassword');
+      expect(content).not.toContain('confirmPassword');
+      expect(content).not.toContain('handleUpdatePassword');
+
+      // Must contain read-only demographic fields
+      expect(content).toContain('student.full_name');
+      expect(content).toContain('student.admission_no');
+      expect(content).toContain('student.gender');
+      expect(content).toContain('student.date_of_birth');
+      expect(content).toContain('student.blood_group');
+      expect(content).toContain('student.b_form_or_cnic');
+      expect(content).toContain('student.admission_date');
+      expect(content).toContain('student.guardian_name');
+      expect(content).toContain('student.guardian_phone');
+      expect(content).toContain('student.address');
+
+      // Must contain photo upload features
+      expect(content).toContain('handleAvatarChange');
+      expect(content).toContain('updateMyAvatar');
+      expect(content).toContain('student.photo_url');
+      expect(content).toContain('accept="image/jpeg,image/png,image/webp,image/gif"');
+    });
+  });
 });
