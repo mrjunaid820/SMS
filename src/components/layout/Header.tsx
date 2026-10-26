@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useSchool } from '@/context/SchoolContext';
+import { isLiveSupabaseConfigured } from '@/config/supabase';
 import { Menu, Sun, Moon, LogOut, Calendar, Search } from 'lucide-react';
 import { Button } from '@/components/common/Button';
 
@@ -48,6 +49,25 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
 
       {/* Right: Theme Toggle & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Persistence Mode Indicator */}
+        {isLiveSupabaseConfigured() ? (
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-full"
+            title="Connected to Supabase Cloud Database"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Cloud Live</span>
+          </div>
+        ) : (
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-full"
+            title="Running in Local Development Mode (Offline Storage)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            <span>Local Storage</span>
+          </div>
+        )}
+
         {/* Quick Search Shortcut */}
         <button
           onClick={() => navigate('/quick-search')}

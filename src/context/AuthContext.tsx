@@ -16,6 +16,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<Profile | null>(() => {
+    if (isLiveSupabaseConfigured()) {
+      const saved = localStorage.getItem('sms_current_user');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.id && parsed.role) {
+            return parsed;
+          }
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+
     const saved = localStorage.getItem('sms_current_user');
     if (saved) {
       try {
@@ -38,7 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // ignore
       }
     }
-    return INITIAL_PROFILES[0]; // Default Administrator session for initial install
+    return INITIAL_PROFILES[0]; // Default Administrator session only for local dev install
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -46,32 +61,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (isLiveSupabaseConfigured()) {
       setIsLoading(true);
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-            .then(({ data }) => {
-              if (data) {
-                setUser(data);
-                localStorage.setItem('sms_current_user', JSON.stringify(data));
-              }
-              setIsLoading(false);
-            });
-        } else {
+      supabase.auth.getSession().then(({ data: { session }, error }) => {
+        if (error || !session?.user) {
+          setUser(null);
+          localStorage.removeItem('sms_current_user');
           setIsLoading(false);
+          return;
         }
+
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single()
+          .then(({ data, error: profErr }) => {
+            if (data && !profErr && data.is_active !== false) {
+              setUser(data);
+              localStorage.setItem('sms_current_user', JSON.stringify(data));
+            } else {
+              setUser(null);
+              localStorage.removeItem('sms_current_user');
+            }
+            setIsLoading(false);
+          });
       });
 
       const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user) {
-          const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-          if (data) {
+          const { data, error: profErr } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+          if (data && !profErr && data.is_active !== false) {
             setUser(data);
             localStorage.setItem('sms_current_user', JSON.stringify(data));
+          } else {
+            setUser(null);
+            localStorage.removeItem('sms_current_user');
           }
+        } else {
+          setUser(null);
+          localStorage.removeItem('sms_current_user');
         }
       });
 
@@ -94,7 +121,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: cleanEmail,
           password: password || '',
         });
-        if (error) throw error;
+        if (error) {
+          throw new Error(error.message || 'Authentication failed. Please verify your credentials.');
+        }
         if (data?.user) {
           const { data: profile, error: profErr } = await supabase
             .from('profiles')
@@ -102,6 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .eq('id', data.user.id)
             .single();
           if (profErr || !profile) {
+            await supabase.auth.signOut();
             throw new Error('User profile record not found in authorization directory.');
           }
           if (profile.is_active === false) {
@@ -153,7 +183,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     if (isLiveSupabaseConfigured()) {
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn('Error during signOut:', e);
+      }
     }
     setUser(null);
     localStorage.removeItem('sms_current_user');
