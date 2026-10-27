@@ -1,3 +1,4 @@
+import { createClient } from '@supabase/supabase-js';
 import { supabase, isLiveSupabaseConfigured } from '@/config/supabase';
 import {
   Profile,
@@ -415,6 +416,36 @@ export const teacherApi = {
     teacherId: string,
     actor?: { id?: string; name?: string; role?: string }
   ): Promise<Profile> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data: liveTeacher, error: tErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('id', teacherId)
+        .single();
+      if (tErr || !liveTeacher) throw new Error('Teacher record not found.');
+
+      if (liveTeacher.profile_id) {
+        const { data: existingProf } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', liveTeacher.profile_id)
+          .single();
+        if (existingProf) return existingProf;
+      }
+
+      if (liveTeacher.email) {
+        const { data: matchProf } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', liveTeacher.email.toLowerCase())
+          .maybeSingle();
+        if (matchProf) {
+          await supabase.from('teachers').update({ profile_id: matchProf.id }).eq('id', teacherId);
+          return matchProf;
+        }
+      }
+    }
+
     const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
     const tIdx = teachers.findIndex((t) => t.id === teacherId);
     if (tIdx === -1) throw new Error('Teacher record not found.');
@@ -436,7 +467,7 @@ export const teacherApi = {
       return matchByEmail;
     }
 
-    // Create a new profile with UUID and link
+    // Create a new profile with UUID and link for local dev mode
     const newProfile: Profile = {
       id: generateUUID(),
       role: 'teacher',
@@ -451,11 +482,6 @@ export const teacherApi = {
     setStorage('profiles', [...profiles, newProfile]);
     teachers[tIdx] = { ...teacher, profile_id: newProfile.id, email: newProfile.email };
     setStorage('teachers', [...teachers]);
-
-    if (isLiveSupabaseConfigured()) {
-      await supabase.from('profiles').insert([newProfile]);
-      await supabase.from('teachers').update({ profile_id: newProfile.id }).eq('id', teacherId);
-    }
 
     return newProfile;
   },
@@ -474,6 +500,68 @@ export const teacherApi = {
       throw new Error('Validation Error: A valid email address is required.');
     }
 
+    if (isLiveSupabaseConfigured()) {
+      const { data: teacher, error: tErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('id', teacherId)
+        .single();
+      if (tErr || !teacher) throw new Error('Teacher record not found.');
+
+      // Check duplicate email
+      const { data: dupProf } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', trimmedEmail)
+        .neq('id', teacher.profile_id || '')
+        .maybeSingle();
+
+      if (dupProf) {
+        throw new Error(`Validation Error: The email address "${newEmail}" is already registered to another user account.`);
+      }
+
+      // Try Edge Function
+      try {
+        const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'update_login_email',
+            teacherId,
+            userId: teacher.profile_id,
+            newEmail: trimmedEmail,
+          },
+        });
+        if (!edgeErr && edgeData && edgeData.success) {
+          await logAudit(actor || {}, 'TEACHER_LOGIN_EMAIL_UPDATED', 'teachers', teacherId, {
+            target_user_id: teacher.profile_id,
+            previous_email: teacher.email,
+            new_email: trimmedEmail,
+          });
+          return { success: true, message: `Teacher login email successfully updated to ${trimmedEmail}.` };
+        }
+      } catch (e) {
+        // Fall back to direct database updates
+      }
+
+      if (teacher.profile_id) {
+        await supabase
+          .from('profiles')
+          .update({ email: trimmedEmail, updated_at: new Date().toISOString() })
+          .eq('id', teacher.profile_id);
+      }
+      await supabase
+        .from('teachers')
+        .update({ email: trimmedEmail })
+        .eq('id', teacherId);
+
+      await logAudit(actor || {}, 'TEACHER_LOGIN_EMAIL_UPDATED', 'teachers', teacherId, {
+        target_user_id: teacher.profile_id,
+        previous_email: teacher.email,
+        new_email: trimmedEmail,
+      });
+
+      return { success: true, message: `Teacher email successfully updated to ${trimmedEmail}.` };
+    }
+
     const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
     const tIdx = teachers.findIndex((t) => t.id === teacherId);
     if (tIdx === -1) throw new Error('Teacher record not found.');
@@ -481,7 +569,6 @@ export const teacherApi = {
     const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
     const teacher = teachers[tIdx];
 
-    // 1. Check uniqueness across all other user profiles and teachers
     const duplicateProfile = profiles.find(
       (p) => p.email.toLowerCase() === trimmedEmail && p.id !== teacher.profile_id
     );
@@ -493,54 +580,25 @@ export const teacherApi = {
       throw new Error(`Validation Error: The email address "${newEmail}" is already registered to another user account.`);
     }
 
-    if (isLiveSupabaseConfigured()) {
-      try {
-        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
-          body: {
-            action: 'update_login_email',
-            teacherId,
-            userId: teacher.profile_id,
-            newEmail: trimmedEmail,
-          },
-        });
-        if (error) throw new Error(`Supabase Auth update failed: ${error.message}`);
-        if (data && !data.success) throw new Error(data.error || data.message || 'Failed to update login identity.');
-      } catch (e: any) {
-        // Direct database fallback if edge function not yet deployed
-        if (teacher.profile_id) {
-          await supabase
-            .from('profiles')
-            .update({ email: trimmedEmail, updated_at: new Date().toISOString() })
-            .eq('id', teacher.profile_id);
-        }
-        await supabase
-          .from('teachers')
-          .update({ email: trimmedEmail })
-          .eq('id', teacherId);
-      }
-    } else {
-      // Persistent Storage Mode
-      const oldEmail = teacher.email;
-      teachers[tIdx] = { ...teacher, email: trimmedEmail };
-      setStorage('teachers', [...teachers]);
+    const oldEmail = teacher.email;
+    teachers[tIdx] = { ...teacher, email: trimmedEmail };
+    setStorage('teachers', [...teachers]);
 
-      const pIdx = profiles.findIndex(
-        (p) => p.id === teacher.profile_id || (oldEmail && p.email.toLowerCase() === oldEmail.toLowerCase())
-      );
-      if (pIdx !== -1) {
-        profiles[pIdx] = { ...profiles[pIdx], email: trimmedEmail, updated_at: new Date().toISOString() };
-        setStorage('profiles', [...profiles]);
-      }
-
-      // Update passwords map key if exists
-      try {
-        const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
-        if (oldEmail && passMap[oldEmail.toLowerCase()]) {
-          passMap[trimmedEmail] = passMap[oldEmail.toLowerCase()];
-          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
-        }
-      } catch {}
+    const pIdx = profiles.findIndex(
+      (p) => p.id === teacher.profile_id || (oldEmail && p.email.toLowerCase() === oldEmail.toLowerCase())
+    );
+    if (pIdx !== -1) {
+      profiles[pIdx] = { ...profiles[pIdx], email: trimmedEmail, updated_at: new Date().toISOString() };
+      setStorage('profiles', [...profiles]);
     }
+
+    try {
+      const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+      if (oldEmail && passMap[oldEmail.toLowerCase()]) {
+        passMap[trimmedEmail] = passMap[oldEmail.toLowerCase()];
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      }
+    } catch {}
 
     await logAudit(
       actor || {},
@@ -565,37 +623,85 @@ export const teacherApi = {
       throw new Error('Unauthorized: Only administrators are authorized to reset teacher passwords.');
     }
 
-    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
-    const teacher = teachers.find((t) => t.id === teacherId);
-    if (!teacher) throw new Error('Teacher record not found.');
-
-    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
-    const profile = profiles.find(
-      (p) => p.id === teacher.profile_id || (teacher.email && p.email.toLowerCase() === teacher.email.toLowerCase())
-    );
-    const targetUserId = profile?.id || teacher.profile_id;
-
     if (options.temporaryPassword && options.temporaryPassword.length < 6) {
       throw new Error('Validation Error: Temporary password must be at least 6 characters.');
     }
 
     if (isLiveSupabaseConfigured()) {
-      try {
-        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
-          body: {
-            action: options.temporaryPassword ? 'set_temporary_password' : 'send_reset_link',
-            teacherId,
-            userId: targetUserId,
-            temporaryPassword: options.temporaryPassword,
-          },
-        });
-        if (error) throw new Error(`Supabase Auth password reset failed: ${error.message}`);
-      } catch (e: any) {
-        if (options.sendResetLink && profile?.email) {
-          await supabase.auth.resetPasswordForEmail(profile.email);
+      const { data: teacher, error: tErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('id', teacherId)
+        .single();
+
+      if (tErr || !teacher) throw new Error('Teacher record not found.');
+
+      let targetUserId = teacher.profile_id;
+      let targetEmail = teacher.email;
+
+      if (!targetUserId && targetEmail) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .eq('email', targetEmail.toLowerCase())
+          .maybeSingle();
+        if (prof) targetUserId = prof.id;
+      }
+
+      if (options.temporaryPassword && targetUserId) {
+        try {
+          const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+            body: {
+              action: 'set_temporary_password',
+              teacherId,
+              userId: targetUserId,
+              temporaryPassword: options.temporaryPassword,
+              role: 'teacher',
+            },
+          });
+
+          if (!edgeErr && edgeData && edgeData.success) {
+            await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
+              target_user_id: targetUserId,
+              method: 'TEMPORARY_PASSWORD_ASSIGNED',
+            });
+            return { success: true, message: 'Temporary password assigned and active sessions revoked.' };
+          }
+        } catch (e) {
+          // Edge function unavailable
         }
       }
+
+      if (targetEmail) {
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
+        if (resetErr) throw new Error(`Password reset failed: ${resetErr.message}`);
+
+        await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
+          target_user_id: targetUserId,
+          target_email: targetEmail,
+          method: 'RESET_LINK_DISPATCHED',
+        });
+
+        return {
+          success: true,
+          message: options.temporaryPassword
+            ? `Direct password update requires the deployed "admin-manage-user" Edge Function. An authorized password reset link was dispatched to ${targetEmail} instead.`
+            : `Authorized password reset link dispatched to ${targetEmail}.`,
+        };
+      }
+
+      throw new Error('No valid email address found for teacher account.');
     } else {
+      const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+      const teacher = teachers.find((t) => t.id === teacherId);
+      if (!teacher) throw new Error('Teacher record not found.');
+
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+      const profile = profiles.find(
+        (p) => p.id === teacher.profile_id || (teacher.email && p.email.toLowerCase() === teacher.email.toLowerCase())
+      );
+      const targetUserId = profile?.id || teacher.profile_id;
+
       // Save temporary password to credentials store
       if (options.temporaryPassword) {
         try {
@@ -605,26 +711,26 @@ export const teacherApi = {
           localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
         } catch {}
       }
+
+      await logAudit(
+        actor || {},
+        'TEACHER_PASSWORD_RESET',
+        'profiles',
+        targetUserId || teacherId,
+        {
+          target_email: teacher.email,
+          method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'RESET_LINK_DISPATCHED',
+          sessions_revoked: Boolean(options.temporaryPassword),
+        }
+      );
+
+      return {
+        success: true,
+        message: options.temporaryPassword
+          ? `Temporary password successfully assigned for ${teacher.full_name}. Active sessions revoked.`
+          : `Authorized password reset link dispatched to ${teacher.email}.`,
+      };
     }
-
-    await logAudit(
-      actor || {},
-      'TEACHER_PASSWORD_RESET',
-      'profiles',
-      targetUserId || teacherId,
-      {
-        target_email: teacher.email,
-        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'RESET_LINK_DISPATCHED',
-        sessions_revoked: Boolean(options.temporaryPassword),
-      }
-    );
-
-    return {
-      success: true,
-      message: options.temporaryPassword
-        ? `Temporary password successfully assigned for ${teacher.full_name}. Active sessions revoked.`
-        : `Authorized password reset link dispatched to ${teacher.email}.`,
-    };
   },
 
   getAssignments: async (sessionId?: string): Promise<TeacherAssignment[]> => {
@@ -993,6 +1099,129 @@ export const studentApi = {
       throw new Error('Validation Error: A valid student email address is required.');
     }
 
+    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      // 1. Fetch live student
+      const { data: liveStudent, error: sErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', studentId)
+        .single();
+
+      if (sErr || !liveStudent) {
+        throw new Error('Student record not found in database.');
+      }
+      if (!liveStudent.is_active) {
+        throw new Error('Cannot provision account for an archived or inactive student.');
+      }
+      if (liveStudent.profile_id) {
+        throw new Error('Student already has an active portal login account linked.');
+      }
+
+      // 2. Check duplicate email in profiles
+      const { data: emailConflict } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', cleanEmail)
+        .maybeSingle();
+
+      if (emailConflict) {
+        throw new Error(`Validation Error: An account with email "${cleanEmail}" is already registered.`);
+      }
+
+      // 3. Try server-side Edge Function first
+      try {
+        const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'provision_student',
+            studentId,
+            email: cleanEmail,
+            temporaryPassword: options.temporaryPassword,
+          },
+        });
+
+        if (!edgeErr && edgeData && edgeData.success && edgeData.profile && edgeData.student) {
+          return { profile: edgeData.profile, student: edgeData.student };
+        }
+      } catch (err) {
+        // Fall back to client auth creation if edge function not yet deployed
+      }
+
+      // 4. Client fallback: Create auth user with isolated, non-persisting client
+      const rawUrl = import.meta.env.VITE_SUPABASE_URL;
+      const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const standaloneAuth = createClient(rawUrl, rawKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const { data: signUpData, error: signUpErr } = await standaloneAuth.auth.signUp({
+        email: cleanEmail,
+        password: options.temporaryPassword || 'Student123!',
+        options: {
+          data: {
+            role: 'student',
+            full_name: liveStudent.full_name,
+          },
+        },
+      });
+
+      if (signUpErr || !signUpData.user) {
+        throw new Error(`Supabase Auth account creation failed: ${signUpErr?.message || 'Unknown error'}`);
+      }
+
+      const newUserId = signUpData.user.id;
+
+      // 5. Insert public.profiles
+      const newProfile: Profile = {
+        id: newUserId,
+        role: 'student',
+        full_name: liveStudent.full_name,
+        email: cleanEmail,
+        phone: liveStudent.guardian_phone || undefined,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: insertedProfile, error: pInsertErr } = await supabase
+        .from('profiles')
+        .insert([newProfile])
+        .select()
+        .single();
+
+      if (pInsertErr) {
+        throw new Error(`Failed to create student user profile: ${pInsertErr.message}`);
+      }
+
+      // 6. Link to public.students
+      const { data: updatedStudent, error: sUpdErr } = await supabase
+        .from('students')
+        .update({
+          profile_id: newUserId,
+          email: cleanEmail,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', studentId)
+        .select()
+        .single();
+
+      if (sUpdErr) {
+        throw new Error(`Failed to link login account to student record: ${sUpdErr.message}`);
+      }
+
+      await logAudit(actor || {}, 'STUDENT_ACCOUNT_PROVISIONED', 'students', studentId, {
+        profile_id: newUserId,
+        student_admission_no: liveStudent.admission_no,
+        email: cleanEmail,
+        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'INVITATION_LINK_DISPATCHED',
+      });
+
+      return { profile: insertedProfile, student: updatedStudent };
+    }
+
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
     const sIdx = students.findIndex((s) => s.id === studentId);
     if (sIdx === -1) {
@@ -1003,20 +1232,14 @@ export const studentApi = {
       throw new Error('Cannot provision account for an archived or inactive student.');
     }
 
-    // Check if student already has a portal account linked
     if (student.profile_id) {
       throw new Error('Student already has an active portal login account linked.');
     }
 
-    // Check duplicate email across existing profiles
     const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
     const emailConflict = profiles.find((p) => p.email.toLowerCase() === cleanEmail);
     if (emailConflict) {
       throw new Error(`Validation Error: An account with email "${cleanEmail}" is already registered.`);
-    }
-
-    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
-      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
     }
 
     const newProfileId = generateUUID();
@@ -1031,47 +1254,25 @@ export const studentApi = {
       updated_at: new Date().toISOString(),
     };
 
-    if (isLiveSupabaseConfigured()) {
+    setStorage('profiles', [...profiles, newProfile]);
+
+    if (options.temporaryPassword) {
       try {
-        const { data, error } = await supabase.functions.invoke('admin-manage-user', {
-          body: {
-            action: 'provision_student',
-            studentId,
-            email: cleanEmail,
-            temporaryPassword: options.temporaryPassword,
-          },
-        });
-        if (error) throw new Error(`Supabase Auth provisioning failed: ${error.message}`);
-      } catch (e: any) {
-        // Direct database fallback if edge function not yet deployed
-        await supabase.from('profiles').insert([newProfile]);
-        await supabase
-          .from('students')
-          .update({ profile_id: newProfileId, email: cleanEmail, updated_at: new Date().toISOString() })
-          .eq('id', studentId);
-      }
-    } else {
-      // Local persistent storage mode
-      setStorage('profiles', [...profiles, newProfile]);
-
-      if (options.temporaryPassword) {
-        try {
-          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
-          passMap[newProfileId] = options.temporaryPassword;
-          passMap[cleanEmail] = options.temporaryPassword;
-          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
-        } catch {}
-      }
-
-      const updatedStudent: Student = {
-        ...student,
-        profile_id: newProfileId,
-        email: cleanEmail,
-        updated_at: new Date().toISOString(),
-      };
-      students[sIdx] = updatedStudent;
-      setStorage('students', [...students]);
+        const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+        passMap[newProfileId] = options.temporaryPassword;
+        passMap[cleanEmail] = options.temporaryPassword;
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      } catch {}
     }
+
+    const updatedStudent: Student = {
+      ...student,
+      profile_id: newProfileId,
+      email: cleanEmail,
+      updated_at: new Date().toISOString(),
+    };
+    students[sIdx] = updatedStudent;
+    setStorage('students', [...students]);
 
     await logAudit(
       actor || {},
@@ -1086,10 +1287,7 @@ export const studentApi = {
       }
     );
 
-    const updatedStudents = getStorage<Student[]>('students', INITIAL_STUDENTS);
-    const finalStudent = updatedStudents.find((s) => s.id === studentId) || { ...student, profile_id: newProfileId, email: cleanEmail };
-
-    return { profile: newProfile, student: finalStudent };
+    return { profile: newProfile, student: updatedStudent };
   },
 
   resetStudentPassword: async (
@@ -1106,6 +1304,101 @@ export const studentApi = {
         ? { temporaryPassword: optionsOrPassword }
         : optionsOrPassword || {};
 
+    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: liveStudent, error: sErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', studentId)
+        .single();
+
+      if (sErr || !liveStudent) {
+        throw new Error('Student record not found in database.');
+      }
+      if (!liveStudent.profile_id && !liveStudent.email) {
+        throw new Error('Student does not have a linked portal account.');
+      }
+
+      let targetProfileId = liveStudent.profile_id;
+      let targetEmail = liveStudent.email;
+
+      if (targetProfileId) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .eq('id', targetProfileId)
+          .single();
+        if (prof) {
+          targetEmail = prof.email;
+        }
+      } else if (targetEmail) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('id, email')
+          .eq('email', targetEmail.toLowerCase())
+          .maybeSingle();
+        if (prof) {
+          targetProfileId = prof.id;
+        }
+      }
+
+      // Try Edge Function if temporaryPassword requested
+      if (options.temporaryPassword && targetProfileId) {
+        try {
+          const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+            body: {
+              action: 'set_temporary_password',
+              userId: targetProfileId,
+              temporaryPassword: options.temporaryPassword,
+              role: 'student',
+            },
+          });
+
+          if (!edgeErr && edgeData && edgeData.success) {
+            await logAudit(actor || {}, 'STUDENT_PASSWORD_RESET', 'profiles', targetProfileId, {
+              target_student_id: studentId,
+              target_email: targetEmail,
+              method: 'TEMPORARY_PASSWORD_ASSIGNED',
+            });
+            return {
+              success: true,
+              profileId: targetProfileId,
+              message: `Temporary password successfully assigned for ${liveStudent.full_name}. Active sessions revoked.`,
+            };
+          }
+        } catch (e) {
+          // Edge function unavailable
+        }
+      }
+
+      // If sendResetLink or if Edge Function was unavailable, dispatch email reset link
+      if (targetEmail) {
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
+        if (resetErr) {
+          throw new Error(`Password reset failed: ${resetErr.message}`);
+        }
+
+        await logAudit(actor || {}, 'STUDENT_PASSWORD_RESET', 'profiles', targetProfileId || studentId, {
+          target_student_id: studentId,
+          target_email: targetEmail,
+          method: 'RESET_LINK_DISPATCHED',
+        });
+
+        return {
+          success: true,
+          profileId: targetProfileId,
+          message: options.temporaryPassword
+            ? `Direct password update requires the deployed "admin-manage-user" Edge Function. An authorized password reset link was dispatched to ${targetEmail} instead.`
+            : `Authorized password reset link dispatched to ${targetEmail}.`,
+        };
+      }
+
+      throw new Error('Unable to reset password: No valid email address associated with student profile.');
+    }
+
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
     const student = students.find((s) => s.id === studentId);
     if (!student) throw new Error('Student record not found.');
@@ -1119,33 +1412,13 @@ export const studentApi = {
     );
     if (!profile) throw new Error('Linked student authentication profile not found.');
 
-    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
-      throw new Error('Validation Error: Temporary password must be at least 6 characters.');
-    }
-
-    if (isLiveSupabaseConfigured()) {
+    if (options.temporaryPassword) {
       try {
-        await supabase.functions.invoke('admin-manage-user', {
-          body: {
-            action: options.temporaryPassword ? 'set_temporary_password' : 'send_reset_link',
-            userId: profile.id,
-            temporaryPassword: options.temporaryPassword,
-          },
-        });
-      } catch (e: any) {
-        if (options.sendResetLink && profile.email) {
-          await supabase.auth.resetPasswordForEmail(profile.email);
-        }
-      }
-    } else {
-      if (options.temporaryPassword) {
-        try {
-          const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
-          passMap[profile.id] = options.temporaryPassword;
-          passMap[profile.email.toLowerCase()] = options.temporaryPassword;
-          localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
-        } catch {}
-      }
+        const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+        passMap[profile.id] = options.temporaryPassword;
+        passMap[profile.email.toLowerCase()] = options.temporaryPassword;
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      } catch {}
     }
 
     await logAudit(
@@ -1175,6 +1448,62 @@ export const studentApi = {
   ): Promise<{ is_active: boolean; profile: Profile }> => {
     if (actor && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to modify account status.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: liveStudent, error: sErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', studentId)
+        .single();
+
+      if (sErr || !liveStudent || !liveStudent.profile_id) {
+        throw new Error('Student does not have a linked portal account.');
+      }
+
+      const { data: liveProfile, error: pErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', liveStudent.profile_id)
+        .single();
+
+      if (pErr || !liveProfile) {
+        throw new Error('Linked user account profile not found.');
+      }
+
+      const newActiveState = !liveProfile.is_active;
+
+      const { data: updatedProfile, error: updErr } = await supabase
+        .from('profiles')
+        .update({ is_active: newActiveState, updated_at: new Date().toISOString() })
+        .eq('id', liveProfile.id)
+        .select()
+        .single();
+
+      if (updErr) {
+        throw new Error(`Failed to update account status: ${updErr.message}`);
+      }
+
+      try {
+        await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'toggle_user_status',
+            userId: liveProfile.id,
+          },
+        });
+      } catch (e) {
+        // Non-blocking
+      }
+
+      await logAudit(
+        actor || {},
+        newActiveState ? 'STUDENT_ACCOUNT_ENABLED' : 'STUDENT_ACCOUNT_DISABLED',
+        'profiles',
+        liveProfile.id,
+        { student_id: liveStudent.id, new_status: newActiveState }
+      );
+
+      return { is_active: newActiveState, profile: updatedProfile };
     }
 
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
@@ -2310,6 +2639,18 @@ export const quizApi = {
     enrollmentId: string,
     actor?: { role?: string }
   ): Promise<(QuizMark & { quiz: Quiz })[]> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('quiz_marks')
+        .select('*, quiz:quizzes(*, class:classes(*), section:sections(*), subject:subjects(*))')
+        .eq('enrollment_id', enrollmentId);
+      if (!error && data) {
+        return (data as any[]).filter(
+          (m) => Boolean(m.quiz) && (!actor || actor.role !== 'student' || m.quiz.status !== 'draft')
+        );
+      }
+    }
+
     const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
     const quizzes = await quizApi.getQuizzes(undefined, actor as any);
 
