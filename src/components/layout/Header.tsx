@@ -51,21 +51,23 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
       <div className="flex items-center gap-2 sm:gap-3">
         {/* Persistence Mode Indicator */}
         {isLiveSupabaseConfigured() ? (
-          <div
-            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-full"
-            title="Connected to Supabase Cloud Database"
+          <button
+            onClick={() => role === 'admin' && navigate('/server-database')}
+            className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-full transition-colors ${role === 'admin' ? 'hover:bg-emerald-100 dark:hover:bg-emerald-900/50 cursor-pointer' : 'cursor-default'}`}
+            title={role === 'admin' ? 'Click to inspect Server & Database Health' : 'Connected to Supabase Cloud Database'}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span>Cloud Live</span>
-          </div>
+          </button>
         ) : (
-          <div
-            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-full"
-            title="Running in Local Development Mode (Offline Storage)"
+          <button
+            onClick={() => role === 'admin' && navigate('/server-database')}
+            className={`hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-full transition-colors ${role === 'admin' ? 'hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer' : 'cursor-default'}`}
+            title={role === 'admin' ? 'Click to inspect Server & Database Connection' : 'Running in Local Development Mode (Offline Storage)'}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
             <span>Local Storage</span>
-          </div>
+          </button>
         )}
 
         {/* Quick Search Shortcut */}

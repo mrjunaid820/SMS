@@ -234,6 +234,14 @@ export const App: React.FC = () => {
                   }
                 />
                 <Route
+                  path="/server-database"
+                  element={
+                    <AdminRoute>
+                      <SettingsPage defaultTab="server" />
+                    </AdminRoute>
+                  }
+                />
+                <Route
                   path="/users-roles"
                   element={
                     <AdminRoute>

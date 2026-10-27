@@ -723,8 +723,26 @@ export const studentApi = {
 
   generateAdmissionNo: async (): Promise<string> => {
     const currentYear = new Date().getFullYear();
-    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
     const prefix = `ADM-${currentYear}-`;
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('admission_no')
+          .like('admission_no', `${prefix}%`)
+          .order('admission_no', { ascending: false })
+          .limit(1);
+        if (!error && data && data.length > 0) {
+          const lastNum = parseInt(data[0].admission_no.replace(prefix, ''), 10);
+          const nextSeq = isNaN(lastNum) ? 1 : lastNum + 1;
+          return `${prefix}${String(nextSeq).padStart(4, '0')}`;
+        }
+        if (!error) return `${prefix}0001`;
+      } catch (e) {
+        console.warn('Failed to query max admission_no from Supabase', e);
+      }
+    }
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
     const seqs = students
       .filter(s => s.admission_no.startsWith(prefix))
       .map(s => parseInt(s.admission_no.replace(prefix, ''), 10))
@@ -734,6 +752,23 @@ export const studentApi = {
   },
 
   generateNextRollNo: async (sessionId: string, sectionId: string): Promise<number> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('enrollments')
+          .select('roll_no')
+          .eq('academic_session_id', sessionId)
+          .eq('section_id', sectionId)
+          .order('roll_no', { ascending: false })
+          .limit(1);
+        if (!error && data && data.length > 0 && typeof data[0].roll_no === 'number') {
+          return data[0].roll_no + 1;
+        }
+        if (!error) return 1;
+      } catch (e) {
+        console.warn('Failed to query max roll_no from Supabase', e);
+      }
+    }
     const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
     const currentRolls = enrollments
       .filter(e => e.academic_session_id === sessionId && e.section_id === sectionId)
@@ -1182,8 +1217,11 @@ export const attendanceApi = {
         .from('attendance')
         .select('*, enrollment:enrollments(*, student:students(*))')
         .eq('date', date);
-      if (!error && data) {
-        return data.filter((a: any) => a.enrollment?.section_id === sectionId);
+      if (error) {
+        throw new Error(`Database error fetching attendance: ${error.message}`);
+      }
+      if (data) {
+        return data.filter((a: any) => !sectionId || a.enrollment?.section_id === sectionId);
       }
     }
     const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
@@ -1212,8 +1250,11 @@ export const attendanceApi = {
         marked_by: actor?.id,
         updated_at: new Date().toISOString(),
       }));
-      const { data, error } = await supabase.from('attendance').upsert(payload, { onConflict: 'enrollment_id, date' }).select();
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from('attendance')
+        .upsert(payload, { onConflict: 'enrollment_id, date' })
+        .select('*, enrollment:enrollments(*, student:students(*))');
+      if (error) throw new Error(`Database error saving attendance records: ${error.message}`);
       await logAudit(actor || {}, 'ATTENDANCE_BATCH_RECORDED', 'attendance', date, { count: records.length });
       return data;
     }
@@ -1257,7 +1298,8 @@ export const attendanceApi = {
         .select('*')
         .eq('enrollment_id', enrollmentId)
         .order('date', { ascending: false });
-      if (!error && data) return data;
+      if (error) throw new Error(`Database error fetching student attendance history: ${error.message}`);
+      if (data) return data;
     }
     const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
     return attendance
@@ -1271,6 +1313,15 @@ export const attendanceApi = {
 // -------------------------------------------------------------
 export const feeApi = {
   getStructures: async (sessionId?: string): Promise<FeeStructure[]> => {
+    if (isLiveSupabaseConfigured()) {
+      let q = supabase
+        .from('fee_structures')
+        .select('*, class:classes(*), academic_session:academic_sessions(*)');
+      if (sessionId) q = q.eq('academic_session_id', sessionId);
+      const { data, error } = await q;
+      if (error) throw new Error(`Database error fetching fee structures: ${error.message}`);
+      if (data) return data;
+    }
     const structures = getStorage<FeeStructure[]>('fee_structures', INITIAL_FEE_STRUCTURES);
     const classes = await academicStructureApi.getClasses();
     const sessions = await settingsApi.getSessions();
@@ -1287,6 +1338,17 @@ export const feeApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to configure fee structures.');
     }
+    if (isLiveSupabaseConfigured()) {
+      const newStr: FeeStructure = { ...structure, id: generateUUID(), created_at: new Date().toISOString() };
+      const { data, error } = await supabase
+        .from('fee_structures')
+        .insert([newStr])
+        .select('*, class:classes(*), academic_session:academic_sessions(*)')
+        .single();
+      if (error) throw new Error(`Database error saving fee structure: ${error.message}`);
+      await logAudit(actor || {}, 'FEE_STRUCTURE_CREATED', 'fee_structures', data.id, structure);
+      return data;
+    }
     const structures = getStorage<FeeStructure[]>('fee_structures', INITIAL_FEE_STRUCTURES);
     const newStr: FeeStructure = { ...structure, id: generateUUID(), created_at: new Date().toISOString() };
     setStorage('fee_structures', [...structures, newStr]);
@@ -1294,6 +1356,22 @@ export const feeApi = {
   },
 
   getInvoices: async (sessionId?: string, month?: string): Promise<FeeInvoice[]> => {
+    if (isLiveSupabaseConfigured()) {
+      let q = supabase
+        .from('fee_invoices')
+        .select('*, enrollment:enrollments(*, student:students(*), section:sections(*, class:classes(*))), items:fee_invoice_items(*), payments:fee_payments(*)')
+        .order('created_at', { ascending: false });
+      if (sessionId) q = q.eq('academic_session_id', sessionId);
+      if (month) q = q.eq('billing_month', month);
+      const { data, error } = await q;
+      if (error) throw new Error(`Database error fetching fee invoices: ${error.message}`);
+      if (data) {
+        return data.map((inv: any) => ({
+          ...inv,
+          payments: (inv.payments || []).filter((p: any) => !p.is_reversed),
+        }));
+      }
+    }
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
     const enrollments = await studentApi.getEnrollments();
     const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
@@ -1308,6 +1386,21 @@ export const feeApi = {
   },
 
   getInvoiceById: async (id: string): Promise<FeeInvoice | null> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('fee_invoices')
+        .select('*, enrollment:enrollments(*, student:students(*), section:sections(*, class:classes(*))), items:fee_invoice_items(*), payments:fee_payments(*)')
+        .eq('id', id)
+        .maybeSingle();
+      if (error) throw new Error(`Database error fetching invoice: ${error.message}`);
+      if (data) {
+        return {
+          ...data,
+          payments: (data.payments || []).filter((p: any) => !p.is_reversed),
+        };
+      }
+      return null;
+    }
     const invoices = await feeApi.getInvoices();
     return invoices.find(i => i.id === id) || null;
   },
@@ -1321,6 +1414,66 @@ export const feeApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to generate fee invoices.');
     }
+    if (isLiveSupabaseConfigured()) {
+      const enrollments = await studentApi.getEnrollments(sessionId);
+      const structures = await feeApi.getStructures(sessionId);
+      const { data: existingInvoices, error: exErr } = await supabase
+        .from('fee_invoices')
+        .select('id, enrollment_id')
+        .eq('academic_session_id', sessionId)
+        .eq('billing_month', billingMonth);
+      if (exErr) throw new Error(`Database error checking existing invoices: ${exErr.message}`);
+
+      const existingEnrollmentIds = new Set((existingInvoices || []).map((i: any) => i.enrollment_id));
+      let count = 0;
+      const newInvoices: any[] = [];
+      const newItems: any[] = [];
+
+      for (const enr of enrollments) {
+        if (existingEnrollmentIds.has(enr.id)) continue;
+        const classId = enr.section?.class_id;
+        const str = structures.find(s => s.class_id === classId);
+        if (!str) continue;
+
+        const total = Number(str.monthly_tuition) + Number(str.lab_library_fee) + Number(str.other_charges);
+        const invoiceNo = `INV-${billingMonth.replace('-', '')}-${String(existingEnrollmentIds.size + count + 1).padStart(4, '0')}`;
+        const invId = generateUUID();
+
+        newInvoices.push({
+          id: invId,
+          invoice_no: invoiceNo,
+          enrollment_id: enr.id,
+          academic_session_id: sessionId,
+          billing_month: billingMonth,
+          issue_date: new Date().toISOString().split('T')[0],
+          due_date: dueDate,
+          total_amount: total,
+          discount_amount: 0,
+          net_amount: total,
+          paid_amount: 0,
+          status: 'Unpaid',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        newItems.push(
+          { id: generateUUID(), invoice_id: invId, description: `Monthly Tuition Fee (${billingMonth})`, amount: Number(str.monthly_tuition), created_at: new Date().toISOString() },
+          { id: generateUUID(), invoice_id: invId, description: `Lab & Library Charges`, amount: Number(str.lab_library_fee), created_at: new Date().toISOString() }
+        );
+        count++;
+      }
+
+      if (newInvoices.length > 0) {
+        const { error: insErr } = await supabase.from('fee_invoices').insert(newInvoices);
+        if (insErr) throw new Error(`Database error saving generated invoices: ${insErr.message}`);
+        if (newItems.length > 0) {
+          await supabase.from('fee_invoice_items').insert(newItems);
+        }
+      }
+      await logAudit(actor || {}, 'INVOICES_GENERATED_BATCH', 'fee_invoices', billingMonth, { count });
+      return { generatedCount: count };
+    }
+
     const enrollments = await studentApi.getEnrollments(sessionId);
     const structures = await feeApi.getStructures(sessionId);
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
@@ -1382,6 +1535,92 @@ export const feeApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to record fee payments.');
     }
+    if (isLiveSupabaseConfigured()) {
+      // 1. Idempotency Check in Supabase
+      if (idempotencyKey) {
+        const { data: existing } = await supabase
+          .from('fee_payments')
+          .select('*')
+          .eq('idempotency_key', idempotencyKey)
+          .maybeSingle();
+        if (existing) return existing;
+      }
+
+      const { data: inv, error: invErr } = await supabase
+        .from('fee_invoices')
+        .select('*')
+        .eq('id', invoiceId)
+        .single();
+      if (invErr || !inv) throw new Error('Invoice not found in database.');
+
+      const outstanding = Number(inv.net_amount) - Number(inv.paid_amount);
+      if (amount <= 0) throw new Error('Payment amount must be greater than zero');
+      if (amount > outstanding) throw new Error(`Amount of ${amount} exceeds remaining dues of ${outstanding}`);
+
+      // Try invoking PostgreSQL stored procedure fn_process_fee_payment
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('fn_process_fee_payment', {
+        p_invoice_id: invoiceId,
+        p_amount: amount,
+        p_payment_method: paymentMethod,
+        p_reference_no: referenceNo || null,
+        p_recorded_by: actor?.id || null,
+        p_idempotency_key: idempotencyKey || null,
+      });
+
+      if (!rpcErr && rpcRes?.payment_id) {
+        const { data: payRecord } = await supabase.from('fee_payments').select('*').eq('id', rpcRes.payment_id).single();
+        if (payRecord) return payRecord;
+        return {
+          id: rpcRes.payment_id,
+          receipt_no: rpcRes.receipt_no,
+          invoice_id: invoiceId,
+          payment_date: new Date().toISOString().split('T')[0],
+          amount,
+          payment_method: paymentMethod,
+          reference_no: referenceNo,
+          recorded_by: actor?.id,
+          idempotency_key: idempotencyKey,
+          is_reversed: false,
+          created_at: new Date().toISOString(),
+        };
+      }
+
+      // Safe direct database update if RPC is unavailable
+      const currentYearMonth = new Date().toISOString().slice(0, 7).replace('-', '');
+      const receiptNo = `REC-${currentYearMonth}-${generateUUID().slice(0, 4).toUpperCase()}`;
+
+      const newPayment: FeePayment = {
+        id: generateUUID(),
+        receipt_no: receiptNo,
+        invoice_id: invoiceId,
+        payment_date: new Date().toISOString().split('T')[0],
+        amount,
+        payment_method: paymentMethod,
+        reference_no: referenceNo,
+        recorded_by: actor?.id,
+        idempotency_key: idempotencyKey,
+        is_reversed: false,
+        created_at: new Date().toISOString(),
+      };
+
+      const { data: savedPayment, error: payInsErr } = await supabase
+        .from('fee_payments')
+        .insert([newPayment])
+        .select()
+        .single();
+      if (payInsErr) throw new Error(`Database error recording payment: ${payInsErr.message}`);
+
+      const newPaid = Number(inv.paid_amount) + amount;
+      const newStatus = newPaid >= Number(inv.net_amount) ? 'Paid' : 'Partially Paid';
+      await supabase
+        .from('fee_invoices')
+        .update({ paid_amount: newPaid, status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', invoiceId);
+
+      await logAudit(actor || {}, 'PAYMENT_RECORDED', 'fee_payments', savedPayment.id, { receipt_no: receiptNo, amount, paymentMethod });
+      return savedPayment;
+    }
+
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
     const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
 
@@ -1441,6 +1680,45 @@ export const feeApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to reverse fee payments.');
     }
+    if (isLiveSupabaseConfigured()) {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('fn_reverse_fee_payment', {
+        p_payment_id: paymentId,
+        p_reason: reason,
+        p_reversed_by: actor?.id || null,
+      });
+
+      if (!rpcErr && rpcRes?.success) {
+        await logAudit(actor || {}, 'PAYMENT_REVERSED', 'fee_payments', paymentId, { reason });
+        return;
+      }
+
+      // Safe direct database update
+      const { data: payment, error: pErr } = await supabase.from('fee_payments').select('*').eq('id', paymentId).single();
+      if (pErr || !payment) throw new Error('Payment record not found');
+      if (payment.is_reversed) throw new Error('This payment has already been reversed');
+
+      await supabase.from('fee_payments').update({ is_reversed: true }).eq('id', paymentId);
+      const { data: inv } = await supabase.from('fee_invoices').select('*').eq('id', payment.invoice_id).single();
+      if (inv) {
+        const newPaid = Math.max(0, Number(inv.paid_amount) - Number(payment.amount));
+        const newStatus = newPaid === 0 ? 'Unpaid' : 'Partially Paid';
+        await supabase
+          .from('fee_invoices')
+          .update({ paid_amount: newPaid, status: newStatus, updated_at: new Date().toISOString() })
+          .eq('id', payment.invoice_id);
+      }
+
+      await supabase.from('fee_payment_reversals').insert([{
+        payment_id: paymentId,
+        amount: payment.amount,
+        reason,
+        reversed_by: actor?.id,
+      }]);
+
+      await logAudit(actor || {}, 'PAYMENT_REVERSED', 'fee_payments', paymentId, { amount: payment.amount, reason });
+      return;
+    }
+
     const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS);
     const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
 
@@ -1472,7 +1750,16 @@ export const feeApi = {
 
   getFinancialSummary: async (sessionId?: string) => {
     const invoices = await feeApi.getInvoices(sessionId);
-    const payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS).filter(p => !p.is_reversed);
+    let payments: FeePayment[] = [];
+    if (isLiveSupabaseConfigured()) {
+      const { data: payData } = await supabase
+        .from('fee_payments')
+        .select('*')
+        .eq('is_reversed', false);
+      if (payData) payments = payData;
+    } else {
+      payments = getStorage<FeePayment[]>('payments', INITIAL_PAYMENTS).filter(p => !p.is_reversed);
+    }
 
     const totalInvoiced = invoices.reduce((acc, curr) => acc + Number(curr.net_amount), 0);
     const totalCollected = invoices.reduce((acc, curr) => acc + Number(curr.paid_amount), 0);
@@ -1494,6 +1781,16 @@ export const feeApi = {
 // -------------------------------------------------------------
 export const examApi = {
   getExams: async (sessionId?: string): Promise<Exam[]> => {
+    if (isLiveSupabaseConfigured()) {
+      let q = supabase
+        .from('exams')
+        .select('*, academic_session:academic_sessions(*)')
+        .order('start_date', { ascending: false });
+      if (sessionId) q = q.eq('academic_session_id', sessionId);
+      const { data, error } = await q;
+      if (error) throw new Error(`Database error fetching exams: ${error.message}`);
+      if (data) return data;
+    }
     const exams = getStorage<Exam[]>('exams', INITIAL_EXAMS);
     const sessions = await settingsApi.getSessions();
     return exams
@@ -1504,7 +1801,21 @@ export const examApi = {
       }));
   },
 
-  createExam: async (exam: Omit<Exam, 'id' | 'created_at'>, actor?: { id?: string; name?: string }): Promise<Exam> => {
+  createExam: async (exam: Omit<Exam, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Exam> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to create examinations.');
+    }
+    if (isLiveSupabaseConfigured()) {
+      const newExam: Exam = { ...exam, id: generateUUID(), created_at: new Date().toISOString() };
+      const { data, error } = await supabase
+        .from('exams')
+        .insert([newExam])
+        .select('*, academic_session:academic_sessions(*)')
+        .single();
+      if (error) throw new Error(`Database error creating exam: ${error.message}`);
+      await logAudit(actor || {}, 'EXAM_CREATED', 'exams', data.id, { name: exam.name });
+      return data;
+    }
     const exams = getStorage<Exam[]>('exams', INITIAL_EXAMS);
     const newExam: Exam = { ...exam, id: generateUUID(), created_at: new Date().toISOString() };
     setStorage('exams', [...exams, newExam]);
@@ -1512,7 +1823,21 @@ export const examApi = {
     return newExam;
   },
 
-  updateExamStatus: async (id: string, status: Exam['status'], actor?: { id?: string; name?: string }): Promise<Exam> => {
+  updateExamStatus: async (id: string, status: Exam['status'], actor?: { id?: string; name?: string; role?: string }): Promise<Exam> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to update examination status.');
+    }
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('exams')
+        .update({ status })
+        .eq('id', id)
+        .select('*, academic_session:academic_sessions(*)')
+        .single();
+      if (error) throw new Error(`Database error updating exam status: ${error.message}`);
+      await logAudit(actor || {}, 'EXAM_STATUS_CHANGED', 'exams', id, { newStatus: status });
+      return data;
+    }
     const exams = getStorage<Exam[]>('exams', INITIAL_EXAMS);
     const idx = exams.findIndex(e => e.id === id);
     if (idx === -1) throw new Error('Exam not found');
@@ -1523,6 +1848,16 @@ export const examApi = {
   },
 
   getExamSubjects: async (examId?: string, classId?: string): Promise<ExamSubject[]> => {
+    if (isLiveSupabaseConfigured()) {
+      let q = supabase
+        .from('exam_subjects')
+        .select('*, exam:exams(*), class:classes(*), subject:subjects(*)');
+      if (examId) q = q.eq('exam_id', examId);
+      if (classId) q = q.eq('class_id', classId);
+      const { data, error } = await q;
+      if (error) throw new Error(`Database error fetching exam subjects: ${error.message}`);
+      if (data) return data;
+    }
     const examSubjects = getStorage<ExamSubject[]>('exam_subjects', INITIAL_EXAM_SUBJECTS);
     const exams = await examApi.getExams();
     const classes = await academicStructureApi.getClasses();
@@ -1539,6 +1874,16 @@ export const examApi = {
   },
 
   createExamSubject: async (item: Omit<ExamSubject, 'id' | 'created_at'>): Promise<ExamSubject> => {
+    if (isLiveSupabaseConfigured()) {
+      const newES: ExamSubject = { ...item, id: generateUUID(), created_at: new Date().toISOString() };
+      const { data, error } = await supabase
+        .from('exam_subjects')
+        .insert([newES])
+        .select('*, exam:exams(*), class:classes(*), subject:subjects(*)')
+        .single();
+      if (error) throw new Error(`Database error creating exam subject: ${error.message}`);
+      return data;
+    }
     const examSubjects = getStorage<ExamSubject[]>('exam_subjects', INITIAL_EXAM_SUBJECTS);
     const newES: ExamSubject = { ...item, id: generateUUID(), created_at: new Date().toISOString() };
     setStorage('exam_subjects', [...examSubjects, newES]);
@@ -1546,6 +1891,14 @@ export const examApi = {
   },
 
   getMarks: async (examSubjectId: string): Promise<Mark[]> => {
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('marks')
+        .select('*, enrollment:enrollments(*, student:students(*))')
+        .eq('exam_subject_id', examSubjectId);
+      if (error) throw new Error(`Database error fetching marks: ${error.message}`);
+      if (data) return data;
+    }
     const marks = getStorage<Mark[]>('marks', INITIAL_MARKS);
     const enrollments = await studentApi.getEnrollments();
 
@@ -1562,6 +1915,22 @@ export const examApi = {
     marksData: { enrollment_id: string; marks_obtained?: number; is_absent: boolean; remarks?: string }[],
     actor?: { id?: string; name?: string }
   ): Promise<void> => {
+    if (isLiveSupabaseConfigured()) {
+      const payload = marksData.map(item => ({
+        exam_subject_id: examSubjectId,
+        enrollment_id: item.enrollment_id,
+        marks_obtained: item.is_absent ? 0 : item.marks_obtained,
+        is_absent: item.is_absent,
+        remarks: item.remarks,
+        entered_by: actor?.id,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('marks').upsert(payload, { onConflict: 'exam_subject_id, enrollment_id' });
+      if (error) throw new Error(`Database error saving marks: ${error.message}`);
+      await logAudit(actor || {}, 'MARKS_ENTERED_BATCH', 'marks', examSubjectId, { count: marksData.length });
+      return;
+    }
+
     const allMarks = getStorage<Mark[]>('marks', INITIAL_MARKS);
     const updated = [...allMarks];
 
@@ -1601,7 +1970,20 @@ export const examApi = {
 
     const classId = enrollment.section?.class_id;
     const examSubjects = await examApi.getExamSubjects(examId, classId);
-    const marks = getStorage<Mark[]>('marks', INITIAL_MARKS);
+
+    let marks: Mark[] = [];
+    if (isLiveSupabaseConfigured()) {
+      const { data: dbMarks, error: mErr } = await supabase
+        .from('marks')
+        .select('*')
+        .eq('enrollment_id', enrollmentId)
+        .in('exam_subject_id', examSubjects.map(es => es.id));
+      if (!mErr && dbMarks) {
+        marks = dbMarks;
+      }
+    } else {
+      marks = getStorage<Mark[]>('marks', INITIAL_MARKS);
+    }
 
     const subjectResults = examSubjects.map(es => {
       const mark = marks.find(m => m.exam_subject_id === es.id && m.enrollment_id === enrollmentId);
@@ -1660,17 +2042,29 @@ export const dashboardApi = {
     const classes = await academicStructureApi.getClasses();
     const sections = await academicStructureApi.getSections();
     const financial = await feeApi.getFinancialSummary();
-    const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
-    const exams = await examApi.getExams();
-    const auditLogs = await auditApi.getLogs();
-
-    // Today's attendance
+    let todayRecords: AttendanceRecord[] = [];
     const today = new Date().toISOString().split('T')[0];
-    const todayRecords = attendance.filter(a => a.date === today);
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: liveAtt } = await supabase.from('attendance').select('*').eq('date', today);
+        if (liveAtt) todayRecords = liveAtt;
+      } catch (e) {
+        console.warn('Could not query live attendance for dashboard', e);
+      }
+    }
+
+    if (todayRecords.length === 0 && !isLiveSupabaseConfigured()) {
+      const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
+      todayRecords = attendance.filter(a => a.date === today);
+    }
+
     const presentCount = todayRecords.filter(a => a.status === 'Present' || a.status === 'Late').length;
     const absentCount = todayRecords.filter(a => a.status === 'Absent').length;
     const leaveCount = todayRecords.filter(a => a.status === 'Leave').length;
     const attendancePercentage = todayRecords.length > 0 ? Math.round((presentCount / todayRecords.length) * 100) : 0;
+    const exams = await examApi.getExams();
+    const auditLogs = await auditApi.getLogs();
 
     return {
       totalActiveStudents: students.length,
@@ -2303,6 +2697,38 @@ export const diaryApi = {
     }
 
     // Check duplicate entry for same section, subject, date, session
+    if (isLiveSupabaseConfigured()) {
+      const { data: dupData } = await supabase
+        .from('daily_diary')
+        .select('id')
+        .eq('section_id', diary.section_id)
+        .eq('subject_id', diary.subject_id)
+        .eq('diary_date', diary.diary_date)
+        .eq('academic_session_id', diary.academic_session_id)
+        .maybeSingle();
+
+      if (dupData) {
+        const payload = { ...normalizedDiary, updated_at: now };
+        const { data, error } = await supabase.from('daily_diary').update(payload).eq('id', dupData.id).select().single();
+        if (error) throw error;
+        await logAudit(actor || {}, 'DIARY_UPDATED', 'daily_diary', dupData.id, { date: diary.diary_date, status: diary.status });
+        return data;
+      }
+
+      const newDiary: DailyDiary = {
+        ...normalizedDiary,
+        id: generateUUID(),
+        created_by: actor?.id,
+        created_at: now,
+        updated_at: now,
+      };
+
+      const { data, error } = await supabase.from('daily_diary').insert([newDiary]).select().single();
+      if (error) throw error;
+      await logAudit(actor || {}, 'DIARY_CREATED', 'daily_diary', data.id, { date: diary.diary_date, status: diary.status });
+      return data;
+    }
+
     const existingList = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
     const duplicate = existingList.find(
       (d) =>
@@ -2333,13 +2759,6 @@ export const diaryApi = {
       created_at: now,
       updated_at: now,
     };
-
-    if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('daily_diary').insert([newDiary]).select().single();
-      if (error) throw error;
-      await logAudit(actor || {}, 'DIARY_CREATED', 'daily_diary', data.id, { date: diary.diary_date, status: diary.status });
-      return data;
-    }
 
     setStorage('daily_diaries', [newDiary, ...existingList]);
     await logAudit(actor || {}, 'DIARY_CREATED', 'daily_diary', newDiary.id, { date: diary.diary_date, status: diary.status });
