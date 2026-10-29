@@ -636,61 +636,82 @@ export const teacherApi = {
 
       if (tErr || !teacher) throw new Error('Teacher record not found.');
 
-      let targetUserId = teacher.profile_id;
-      let targetEmail = teacher.email;
+      if (options.temporaryPassword) {
+        // 1. Invoke PostgreSQL SECURITY DEFINER RPC
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_reset_teacher_password', {
+          p_teacher_id: teacherId,
+          p_new_password: options.temporaryPassword,
+        });
 
-      if (!targetUserId && targetEmail) {
-        const { data: prof } = await supabase
-          .from('profiles')
-          .select('id, email')
-          .eq('email', targetEmail.toLowerCase())
-          .maybeSingle();
-        if (prof) targetUserId = prof.id;
-      }
-
-      if (options.temporaryPassword && targetUserId) {
-        try {
-          const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
-            body: {
-              action: 'set_temporary_password',
-              teacherId,
-              userId: targetUserId,
-              temporaryPassword: options.temporaryPassword,
-              role: 'teacher',
-            },
+        if (!rpcErr && rpcData?.success) {
+          await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
+            target_user_id: teacher.profile_id,
+            target_email: teacher.email,
+            method: 'TEMPORARY_PASSWORD_ASSIGNED',
           });
+          return {
+            success: true,
+            message: rpcData.message || `Temporary password successfully assigned for ${teacher.full_name}. Teacher can log in immediately.`,
+          };
+        }
 
-          if (!edgeErr && edgeData && edgeData.success) {
-            await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
-              target_user_id: targetUserId,
-              method: 'TEMPORARY_PASSWORD_ASSIGNED',
+        // If RPC failed due to missing migration
+        if (rpcErr && rpcErr.message && rpcErr.message.includes('schema cache')) {
+          // Check edge function
+          try {
+            const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+              body: {
+                action: 'set_temporary_password',
+                teacherId,
+                userId: teacher.profile_id,
+                temporaryPassword: options.temporaryPassword,
+                role: 'teacher',
+              },
             });
-            return { success: true, message: 'Temporary password assigned and active sessions revoked.' };
-          }
-        } catch (e) {
-          // Edge function unavailable
+
+            if (!edgeErr && edgeData && edgeData.success) {
+              await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
+                target_user_id: teacher.profile_id,
+                method: 'TEMPORARY_PASSWORD_ASSIGNED',
+              });
+              return { success: true, message: 'Temporary password assigned and active sessions revoked.' };
+            }
+          } catch {}
+
+          throw new Error('Database migration 013 required: Please run migration 013 in the Supabase SQL Editor to enable server-side teacher password resets.');
+        }
+
+        if (rpcErr) {
+          throw new Error(`Password reset failed: ${rpcErr.message}`);
         }
       }
 
-      if (targetEmail) {
-        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
-        if (resetErr) throw new Error(`Password reset failed: ${resetErr.message}`);
+      if (options.sendResetLink) {
+        let targetEmail = teacher.email;
+        if (!targetEmail && teacher.profile_id) {
+          const { data: prof } = await supabase.from('profiles').select('email').eq('id', teacher.profile_id).maybeSingle();
+          if (prof?.email) targetEmail = prof.email;
+        }
 
-        await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
-          target_user_id: targetUserId,
-          target_email: targetEmail,
-          method: 'RESET_LINK_DISPATCHED',
-        });
+        if (targetEmail) {
+          const { error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
+          if (resetErr) throw new Error(`Password reset failed: ${resetErr.message}`);
 
-        return {
-          success: true,
-          message: options.temporaryPassword
-            ? `Direct password update requires the deployed "admin-manage-user" Edge Function. An authorized password reset link was dispatched to ${targetEmail} instead.`
-            : `Authorized password reset link dispatched to ${targetEmail}.`,
-        };
+          await logAudit(actor || {}, 'TEACHER_PASSWORD_RESET', 'teachers', teacherId, {
+            target_user_id: teacher.profile_id,
+            target_email: targetEmail,
+            method: 'RESET_LINK_DISPATCHED',
+          });
+
+          return {
+            success: true,
+            message: `Authorized password reset link dispatched to ${targetEmail}.`,
+          };
+        }
+        throw new Error('No valid email address found for teacher account.');
       }
 
-      throw new Error('No valid email address found for teacher account.');
+      throw new Error('Please select a password reset method.');
     } else {
       const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
       const teacher = teachers.find((t) => t.id === teacherId);
@@ -729,6 +750,190 @@ export const teacherApi = {
         message: options.temporaryPassword
           ? `Temporary password successfully assigned for ${teacher.full_name}. Active sessions revoked.`
           : `Authorized password reset link dispatched to ${teacher.email}.`,
+      };
+    }
+  },
+
+  provisionTeacherAccount: async (
+    teacherId: string,
+    email?: string,
+    password?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; user_id?: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to provision teacher accounts.');
+    }
+
+    const initialPassword = password || 'Teacher123!';
+    if (initialPassword.length < 6) {
+      throw new Error('Validation Error: Initial password must be at least 6 characters.');
+    }
+
+    if (email !== undefined && email !== '') {
+      const trimmed = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        throw new Error('Validation Error: A valid email address is required.');
+      }
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: teacher, error: tErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('id', teacherId)
+        .single();
+
+      if (tErr || !teacher) throw new Error('Teacher record not found.');
+
+      const cleanEmail = (email || teacher.email || '').trim().toLowerCase();
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        throw new Error('Validation Error: A valid email address is required.');
+      }
+
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_provision_teacher', {
+        p_teacher_id: teacherId,
+        p_email: cleanEmail,
+        p_password: initialPassword,
+      });
+
+      if (rpcErr) {
+        if (rpcErr.message && rpcErr.message.includes('schema cache')) {
+          throw new Error('Database migration 013 required: Please run migration 013 in the Supabase SQL Editor to enable admin_provision_teacher.');
+        }
+        throw new Error(`Provisioning failed: ${rpcErr.message}`);
+      }
+
+      return {
+        success: true,
+        message: `Teacher portal account successfully provisioned for ${teacher.full_name} (${cleanEmail}).`,
+        user_id: rpcData?.user_id,
+      };
+    } else {
+      const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+      const tIdx = teachers.findIndex((t) => t.id === teacherId);
+      if (tIdx === -1) throw new Error('Teacher record not found.');
+
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+      const teacher = teachers[tIdx];
+      const cleanEmail = (email || teacher.email || `teacher_${teacher.employee_id.toLowerCase()}@islamiapublic.edu.pk`).trim().toLowerCase();
+
+      const newProfile: Profile = {
+        id: generateUUID(),
+        role: 'teacher',
+        full_name: teacher.full_name,
+        email: cleanEmail,
+        phone: teacher.phone,
+        is_active: teacher.is_active,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      setStorage('profiles', [...profiles, newProfile]);
+      teachers[tIdx] = { ...teacher, profile_id: newProfile.id, email: cleanEmail };
+      setStorage('teachers', [...teachers]);
+
+      try {
+        const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+        passMap[newProfile.id] = initialPassword;
+        passMap[cleanEmail] = initialPassword;
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      } catch {}
+
+      await logAudit(actor || {}, 'TEACHER_PORTAL_ACCOUNT_PROVISIONED', 'teachers', teacherId, {
+        profile_id: newProfile.id,
+        email: cleanEmail,
+      });
+
+      return {
+        success: true,
+        message: `Teacher portal account provisioned for ${teacher.full_name}.`,
+        user_id: newProfile.id,
+      };
+    }
+  },
+
+  bulkProvisionTeacherAccounts: async (
+    teacherIds: string[],
+    defaultPassword?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; total: number; successCount: number; skippedCount: number; failedCount: number; results: any[] }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to bulk provision teacher accounts.');
+    }
+
+    const initialPassword = defaultPassword || 'Teacher123!';
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_bulk_provision_teachers', {
+        p_teacher_ids: teacherIds,
+        p_default_password: initialPassword,
+      });
+
+      if (!rpcErr && rpcData?.success) {
+        return {
+          success: true,
+          total: rpcData.total_requested || teacherIds.length,
+          successCount: rpcData.success_count || 0,
+          skippedCount: rpcData.skipped_count || 0,
+          failedCount: rpcData.failed_count || 0,
+          results: rpcData.results || [],
+        };
+      }
+
+      // Fallback: sequential provisioning
+      let successCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      const results: any[] = [];
+
+      for (const id of teacherIds) {
+        try {
+          const res = await teacherApi.provisionTeacherAccount(id, undefined, initialPassword, actor);
+          successCount++;
+          results.push({ teacher_id: id, status: 'success', message: res.message });
+        } catch (err: any) {
+          if (err.message && err.message.includes('already has an active')) {
+            skippedCount++;
+            results.push({ teacher_id: id, status: 'skipped', message: err.message });
+          } else {
+            failedCount++;
+            results.push({ teacher_id: id, status: 'failed', error: err.message });
+          }
+        }
+      }
+
+      return {
+        success: true,
+        total: teacherIds.length,
+        successCount,
+        skippedCount,
+        failedCount,
+        results,
+      };
+    } else {
+      let successCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      const results: any[] = [];
+
+      for (const id of teacherIds) {
+        try {
+          const res = await teacherApi.provisionTeacherAccount(id, undefined, initialPassword, actor);
+          successCount++;
+          results.push({ teacher_id: id, status: 'success', message: res.message });
+        } catch (err: any) {
+          failedCount++;
+          results.push({ teacher_id: id, status: 'failed', error: err.message });
+        }
+      }
+
+      return {
+        success: true,
+        total: teacherIds.length,
+        successCount,
+        skippedCount,
+        failedCount,
+        results,
       };
     }
   },

@@ -23,6 +23,11 @@ import {
   ShieldAlert,
   KeyRound,
   Lock,
+  Check,
+  Copy,
+  Sparkles,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 
 export const TeachersPage: React.FC = () => {
@@ -85,6 +90,18 @@ export const TeachersPage: React.FC = () => {
   const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
+
+  // State for Bulk Provisioning
+  const [isBulkProvisionModalOpen, setIsBulkProvisionModalOpen] = useState(false);
+  const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const [bulkReport, setBulkReport] = useState<{
+    total: number;
+    successCount: number;
+    skippedCount: number;
+    failedCount: number;
+    results: any[];
+  } | null>(null);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -159,9 +176,10 @@ export const TeachersPage: React.FC = () => {
     setLoginTeacher(teacher);
     setNewLoginEmail(teacher.email || '');
     setLoginPasswordMethod('temp');
-    setNewTemporaryPassword(`Tch-${Math.random().toString(36).slice(-6)}!`);
+    setNewTemporaryPassword(teacher.profile_id ? `Tch-${Math.random().toString(36).slice(-6)}!` : 'Teacher123!');
     setLoginError(null);
     setLoginSuccess(null);
+    setCopiedCredentials(false);
     setIsManageLoginModalOpen(true);
 
     try {
@@ -173,6 +191,66 @@ export const TeachersPage: React.FC = () => {
       setLoginTeacherProfile(profile);
     } catch (e: any) {
       console.error('Failed to ensure teacher profile', e);
+    }
+  };
+
+  const handleProvisionTeacher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginTeacher) return;
+    setLoginError(null);
+    setLoginSuccess(null);
+
+    const email = newLoginEmail.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLoginError('Validation Error: A valid email address is required.');
+      return;
+    }
+
+    if (!newTemporaryPassword || newTemporaryPassword.length < 6) {
+      setLoginError('Validation Error: Initial password must be at least 6 characters.');
+      return;
+    }
+
+    setIsLoginSubmitting(true);
+    try {
+      const res = await teacherApi.provisionTeacherAccount(
+        loginTeacher.id,
+        email,
+        newTemporaryPassword,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setLoginSuccess(res.message);
+      await loadData();
+      // Update local modal state to reflect active status
+      setLoginTeacher({ ...loginTeacher, email, profile_id: res.user_id || 'active' });
+    } catch (err: any) {
+      setLoginError(err.message || 'Failed to provision teacher portal account.');
+    } finally {
+      setIsLoginSubmitting(false);
+    }
+  };
+
+  const handleBulkProvisionAllTeachers = async () => {
+    const unprovisioned = teachers.filter((t) => !t.profile_id && t.is_active);
+    if (unprovisioned.length === 0) {
+      alert('All eligible active teachers already have provisioned portal accounts.');
+      return;
+    }
+
+    setIsBulkSubmitting(true);
+    setBulkReport(null);
+    try {
+      const report = await teacherApi.bulkProvisionTeacherAccounts(
+        unprovisioned.map((t) => t.id),
+        'Teacher123!',
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setBulkReport(report);
+      await loadData();
+    } catch (err: any) {
+      alert(`Bulk provisioning error: ${err.message}`);
+    } finally {
+      setIsBulkSubmitting(false);
     }
   };
 
@@ -401,6 +479,22 @@ export const TeachersPage: React.FC = () => {
       },
     },
     {
+      key: 'portal_status',
+      header: 'Portal Access',
+      render: (row) =>
+        row.profile_id ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+            <UserCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+            <UserX className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+            Not Provisioned
+          </span>
+        ),
+    },
+    {
       key: 'status',
       header: 'Status',
       render: (row) => (
@@ -437,10 +531,14 @@ export const TeachersPage: React.FC = () => {
           {isAdmin && (
             <button
               onClick={() => handleOpenManageLogin(row)}
-              className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Manage Login & Password"
+              className={`p-1.5 rounded-md transition-colors ${
+                row.profile_id
+                  ? 'text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 font-medium'
+              }`}
+              title={row.profile_id ? 'Manage Login & Password' : 'Provision Portal Account'}
             >
-              <KeyRound className="w-4 h-4" />
+              {row.profile_id ? <KeyRound className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
             </button>
           )}
           {isAdmin && (
@@ -461,6 +559,8 @@ export const TeachersPage: React.FC = () => {
     },
   ];
 
+  const unprovisionedCount = teachers.filter((t) => !t.profile_id && t.is_active).length;
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -474,11 +574,27 @@ export const TeachersPage: React.FC = () => {
           </p>
         </div>
 
-        {isAdmin && (
-          <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
-            Add New Teacher
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAdmin && unprovisionedCount > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={<Sparkles className="w-4 h-4 text-amber-500" />}
+              onClick={() => {
+                setBulkReport(null);
+                setIsBulkProvisionModalOpen(true);
+              }}
+            >
+              Bulk Provision Portals ({unprovisionedCount})
+            </Button>
+          )}
+
+          {isAdmin && (
+            <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
+              Add New Teacher
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Teachers DataTable */}
@@ -873,19 +989,37 @@ export const TeachersPage: React.FC = () => {
       <Modal
         isOpen={isManageLoginModalOpen}
         onClose={() => setIsManageLoginModalOpen(false)}
-        title={loginTeacher ? `Manage Login: ${loginTeacher.full_name}` : 'Manage Teacher Login'}
+        title={
+          loginTeacher
+            ? loginTeacher.profile_id
+              ? `Manage Credentials: ${loginTeacher.full_name}`
+              : `Provision Portal Access: ${loginTeacher.full_name}`
+            : 'Manage Teacher Login'
+        }
         description="Administrator-controlled login identity and credential management"
         size="lg"
       >
         <div className="space-y-6">
           {loginError && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
-              {loginError}
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{loginError}</span>
+              </div>
+              <button onClick={() => setLoginError(null)} className="text-rose-400 hover:text-rose-600 text-xs">
+                &times;
+              </button>
             </div>
           )}
           {loginSuccess && (
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-              {loginSuccess}
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{loginSuccess}</span>
+              </div>
+              <button onClick={() => setLoginSuccess(null)} className="text-emerald-400 hover:text-emerald-600 text-xs">
+                &times;
+              </button>
             </div>
           )}
 
@@ -900,130 +1034,387 @@ export const TeachersPage: React.FC = () => {
               <span className="font-mono font-semibold text-navy-900 dark:text-brand-400">{loginTeacher?.employee_id}</span>
             </div>
             <div>
-              <span className="text-slate-500">Current Login Email:</span>{' '}
+              <span className="text-slate-500">Official Email:</span>{' '}
               <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{loginTeacher?.email || 'None'}</span>
             </div>
             <div>
-              <span className="text-slate-500">Linked Auth User UUID:</span>{' '}
-              <span className="font-mono text-[10px] text-slate-600 dark:text-slate-300">
-                {loginTeacherProfile?.id || loginTeacher?.profile_id || 'Generating...'}
-              </span>
-            </div>
-          </div>
-
-          {/* SECTION A: Update Login Email / Identity */}
-          <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center gap-2">
-              <Mail className="w-4 h-4 text-brand-600" />
-              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-                1. Update Teacher Login Email / Identity
-              </h4>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Updates the authentication identity in Supabase Auth and synchronizes linked profile records while preserving the user UUID.
-            </p>
-
-            <form onSubmit={handleUpdateLoginEmail} className="space-y-3">
-              <Input
-                label="New Login Email Address"
-                type="email"
-                required
-                placeholder="teacher.new@islamiapublic.edu.pk"
-                value={newLoginEmail}
-                onChange={(e) => setNewLoginEmail(e.target.value)}
-              />
-
-              <div className="flex justify-end">
-                <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
-                  Update Login Email
-                </Button>
-              </div>
-            </form>
-          </div>
-
-          {/* SECTION B: Administrator-Controlled Password Reset */}
-          <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-amber-600" />
-              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-                2. Administrator-Controlled Password Reset
-              </h4>
-            </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Teachers cannot change their own passwords. As an Administrator, setting a temporary password revokes active sessions and allows the teacher to log in immediately with the new credentials.
-            </p>
-
-            <form onSubmit={handleResetTeacherPassword} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <label
-                  className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
-                    loginPasswordMethod === 'temp'
-                      ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <input
-                      type="radio"
-                      name="loginPasswordMethod"
-                      checked={loginPasswordMethod === 'temp'}
-                      onChange={() => setLoginPasswordMethod('temp')}
-                    />
-                    <span>Temporary Password</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500">
-                    Assign immediate password & revoke existing sessions
-                  </span>
-                </label>
-
-                <label
-                  className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
-                    loginPasswordMethod === 'link'
-                      ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
-                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <input
-                      type="radio"
-                      name="loginPasswordMethod"
-                      checked={loginPasswordMethod === 'link'}
-                      onChange={() => setLoginPasswordMethod('link')}
-                    />
-                    <span>Dispatch Reset Link</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500">
-                    Send secure one-time password reset link to teacher email
-                  </span>
-                </label>
-              </div>
-
-              {loginPasswordMethod === 'temp' && (
-                <Input
-                  label="Authorized Temporary Password"
-                  required
-                  placeholder="Minimum 6 characters"
-                  value={newTemporaryPassword}
-                  onChange={(e) => setNewTemporaryPassword(e.target.value)}
-                />
-              )}
-
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-[10px] text-slate-400 italic">
-                  * Password change will be recorded in audit log without storing plaintext password.
+              <span className="text-slate-500">Portal Status:</span>{' '}
+              {loginTeacher?.profile_id ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                  <UserCheck className="w-3.5 h-3.5" /> Active & Linked
                 </span>
-                <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
-                  Confirm Password Reset
-                </Button>
-              </div>
-            </form>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400">
+                  <UserX className="w-3.5 h-3.5" /> Not Provisioned
+                </span>
+              )}
+            </div>
           </div>
+
+          {/* Conditional Workflow: Provision Account vs Manage Credentials */}
+          {!loginTeacher?.profile_id ? (
+            /* Workflow: PROVISION UNLINKED TEACHER */
+            <div className="p-4 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg text-amber-700 dark:text-amber-300">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Activate Teacher Portal Account
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                    This teacher does not currently have an active login account in Supabase Auth. Confirm the official institutional email address and set the initial password to grant portal access.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleProvisionTeacher} className="space-y-4 pt-1">
+                <Input
+                  label="Teacher Login Email Address"
+                  type="email"
+                  required
+                  placeholder="teacher.name@islamiapublic.edu.pk"
+                  value={newLoginEmail}
+                  onChange={(e) => setNewLoginEmail(e.target.value)}
+                />
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Initial Portal Password
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewTemporaryPassword('Teacher123!')}
+                        className="text-[11px] text-brand-600 hover:text-brand-700 dark:text-brand-400 underline font-medium"
+                      >
+                        Use Default (Teacher123!)
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewTemporaryPassword(`Tch-${Math.random().toString(36).slice(-6)}!`)}
+                        className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1 font-medium"
+                      >
+                        <Sparkles className="w-3 h-3" /> Generate Random
+                      </button>
+                    </div>
+                  </div>
+
+                  <Input
+                    type="text"
+                    required
+                    placeholder="Minimum 6 characters"
+                    value={newTemporaryPassword}
+                    onChange={(e) => setNewTemporaryPassword(e.target.value)}
+                  />
+                </div>
+
+                {/* Credential Slip for Admin */}
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="text-xs truncate">
+                    <span className="text-slate-500">Credentials: </span>
+                    <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                      {newLoginEmail || 'email'} / {newTemporaryPassword || 'password'}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    leftIcon={copiedCredentials ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(`Teacher: ${loginTeacher?.full_name || ''}\nEmail: ${newLoginEmail}\nPassword: ${newTemporaryPassword}`);
+                      setCopiedCredentials(true);
+                      setTimeout(() => setCopiedCredentials(false), 2000);
+                    }}
+                  >
+                    {copiedCredentials ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button type="submit" size="sm" isLoading={isLoginSubmitting} leftIcon={<UserCheck className="w-4 h-4" />}>
+                    Activate Portal Account
+                  </Button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            /* Workflow: MANAGE PROVISIONED TEACHER */
+            <>
+              {/* SECTION A: Update Login Email / Identity */}
+              <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-brand-600" />
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                    1. Update Teacher Login Email / Identity
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Updates the authentication identity in Supabase Auth and synchronizes linked profile records while preserving user records.
+                </p>
+
+                <form onSubmit={handleUpdateLoginEmail} className="space-y-3">
+                  <Input
+                    label="New Login Email Address"
+                    type="email"
+                    required
+                    placeholder="teacher.new@islamiapublic.edu.pk"
+                    value={newLoginEmail}
+                    onChange={(e) => setNewLoginEmail(e.target.value)}
+                  />
+
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
+                      Update Login Email
+                    </Button>
+                  </div>
+                </form>
+              </div>
+
+              {/* SECTION B: Administrator-Controlled Password Reset */}
+              <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-600" />
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                    2. Administrator-Controlled Password Reset
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Teachers cannot change passwords directly. As an Administrator, setting a new temporary password updates Supabase Auth and allows the teacher to log in immediately.
+                </p>
+
+                <form onSubmit={handleResetTeacherPassword} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label
+                      className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
+                        loginPasswordMethod === 'temp'
+                          ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <input
+                          type="radio"
+                          name="loginPasswordMethod"
+                          checked={loginPasswordMethod === 'temp'}
+                          onChange={() => setLoginPasswordMethod('temp')}
+                        />
+                        <span>Temporary Password</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">
+                        Assign immediate password & revoke existing sessions
+                      </span>
+                    </label>
+
+                    <label
+                      className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 ${
+                        loginPasswordMethod === 'link'
+                          ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <input
+                          type="radio"
+                          name="loginPasswordMethod"
+                          checked={loginPasswordMethod === 'link'}
+                          onChange={() => setLoginPasswordMethod('link')}
+                        />
+                        <span>Dispatch Reset Link</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">
+                        Send secure one-time password reset link to teacher email
+                      </span>
+                    </label>
+                  </div>
+
+                  {loginPasswordMethod === 'temp' && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                          Authorized Temporary Password
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setNewTemporaryPassword('Teacher123!')}
+                            className="text-[11px] text-brand-600 hover:text-brand-700 dark:text-brand-400 underline font-medium"
+                          >
+                            Use Default (Teacher123!)
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setNewTemporaryPassword(`Tch-${Math.random().toString(36).slice(-6)}!`)}
+                            className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1 font-medium"
+                          >
+                            <Sparkles className="w-3 h-3" /> Generate Random
+                          </button>
+                        </div>
+                      </div>
+
+                      <Input
+                        type="text"
+                        required
+                        placeholder="Minimum 6 characters"
+                        value={newTemporaryPassword}
+                        onChange={(e) => setNewTemporaryPassword(e.target.value)}
+                      />
+
+                      {/* Credential Slip for Admin */}
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 mt-2">
+                        <div className="text-xs truncate">
+                          <span className="text-slate-500">New Credentials: </span>
+                          <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                            {loginTeacher?.email || 'email'} / {newTemporaryPassword || 'password'}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          leftIcon={copiedCredentials ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          onClick={() => {
+                            navigator.clipboard.writeText(`Teacher: ${loginTeacher?.full_name}\nEmail: ${loginTeacher?.email}\nPassword: ${newTemporaryPassword}`);
+                            setCopiedCredentials(true);
+                            setTimeout(() => setCopiedCredentials(false), 2000);
+                          }}
+                        >
+                          {copiedCredentials ? 'Copied' : 'Copy'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="text-[10px] text-slate-400 italic">
+                      * Password change will be recorded in audit log without storing plaintext password.
+                    </span>
+                    <Button type="submit" size="sm" isLoading={isLoginSubmitting}>
+                      Confirm Password Reset
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </>
+          )}
 
           <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
             <Button variant="outline" onClick={() => setIsManageLoginModalOpen(false)}>
               Done
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* 5. Modal: Bulk Teacher Portal Provisioning */}
+      <Modal
+        isOpen={isBulkProvisionModalOpen}
+        onClose={() => setIsBulkProvisionModalOpen(false)}
+        title="Bulk Provision Teacher Portals"
+        description="Batch activates portal accounts for all unlinked faculty members"
+        size="md"
+      >
+        <div className="space-y-4">
+          {!bulkReport ? (
+            <>
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 text-xs space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200 text-sm">
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>{unprovisionedCount} Unlinked Teacher Accounts Detected</span>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300">
+                  This operation will provision Supabase Auth accounts for all active faculty members using their institutional email addresses and the school's standard default teacher password:
+                </p>
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-amber-200 dark:border-amber-800 font-mono text-xs flex justify-between items-center">
+                  <span>Default Password: <b>Teacher123!</b></span>
+                  <span className="text-[10px] text-slate-400 font-sans">Administrators can customize anytime</span>
+                </div>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                {teachers
+                  .filter((t) => !t.profile_id && t.is_active)
+                  .map((t) => (
+                    <div
+                      key={t.id}
+                      className="p-2 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <div className="font-semibold text-slate-900 dark:text-slate-100">{t.full_name}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{t.email}</div>
+                      </div>
+                      <Badge variant="warning">Pending</Badge>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button variant="outline" onClick={() => setIsBulkProvisionModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleBulkProvisionAllTeachers}
+                  isLoading={isBulkSubmitting}
+                  leftIcon={<Sparkles className="w-4 h-4" />}
+                >
+                  Provision All ({unprovisionedCount})
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs space-y-3">
+                <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-200 text-sm">
+                  <Check className="w-5 h-5 text-emerald-600" />
+                  <span>Bulk Provisioning Completed</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded border border-emerald-200 dark:border-emerald-800">
+                    <div className="text-lg font-bold text-emerald-600">{bulkReport.successCount}</div>
+                    <div className="text-[10px] text-slate-500">Provisioned</div>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800">
+                    <div className="text-lg font-bold text-slate-600">{bulkReport.skippedCount}</div>
+                    <div className="text-[10px] text-slate-500">Skipped</div>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800">
+                    <div className="text-lg font-bold text-rose-600">{bulkReport.failedCount}</div>
+                    <div className="text-[10px] text-slate-500">Failed</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                {bulkReport.results.map((r: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="p-2 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-900 dark:text-slate-100">
+                        {r.full_name || r.teacher_id}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">{r.email || r.error || r.message}</div>
+                    </div>
+                    <Badge variant={r.status === 'success' ? 'success' : r.status === 'skipped' ? 'info' : 'danger'}>
+                      {r.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+                <Button onClick={() => setIsBulkProvisionModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>
