@@ -6,7 +6,7 @@ import { TableSkeleton } from './LoadingSkeleton';
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: React.ReactNode;
   accessor?: (row: T) => any;
   sortable?: boolean;
   className?: string;

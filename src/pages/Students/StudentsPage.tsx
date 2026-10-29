@@ -29,6 +29,9 @@ import {
   Search,
   KeyRound,
   ShieldCheck,
+  Users,
+  RefreshCw,
+  XCircle,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
@@ -64,6 +67,32 @@ export const StudentsPage: React.FC = () => {
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalSuccess, setPortalSuccess] = useState<string | null>(null);
+
+  // Bulk Student Portal Activation State
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [bulkPassword, setBulkPassword] = useState('Student123!');
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number; currentStudentName: string }>({
+    current: 0,
+    total: 0,
+    currentStudentName: '',
+  });
+  const [bulkResultsModalOpen, setBulkResultsModalOpen] = useState(false);
+  const [bulkResults, setBulkResults] = useState<{
+    total_requested: number;
+    success_count: number;
+    skipped_count: number;
+    failed_count: number;
+    results: Array<{
+      student_id: string;
+      student_name: string;
+      admission_no: string;
+      email: string | null;
+      status: 'success' | 'skipped' | 'failed';
+      message: string;
+    }>;
+  } | null>(null);
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
@@ -487,8 +516,131 @@ export const StudentsPage: React.FC = () => {
     });
   }, [students, enrollments, selectedClassId, selectedSectionId]);
 
+  // Unprovisioned active students in current filtered view
+  const unprovisionedStudents = useMemo(() => {
+    return displayedStudents.filter((s) => !s.profile_id && !s.email && s.is_active);
+  }, [displayedStudents]);
+
+  const handleToggleSelectStudent = (studentId: string) => {
+    setSelectedStudentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllUnprovisioned = () => {
+    const unprovIds = unprovisionedStudents.map((s) => s.id);
+    setSelectedStudentIds(new Set(unprovIds));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedStudentIds(new Set());
+  };
+
+  const handleStartBulkActivation = () => {
+    if (selectedStudentIds.size === 0) return;
+    setBulkPassword('Student123!');
+    setIsBulkConfirmOpen(true);
+  };
+
+  const handleExecuteBulkActivation = async () => {
+    setIsBulkConfirmOpen(false);
+    setIsBulkProcessing(true);
+    setBulkProgress({
+      current: 0,
+      total: selectedStudentIds.size,
+      currentStudentName: 'Initiating provisioning...',
+    });
+
+    try {
+      const idsArray = Array.from(selectedStudentIds);
+      const res = await studentApi.bulkProvisionStudentAccounts(
+        idsArray,
+        bulkPassword,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+
+      setBulkResults(res);
+      setBulkResultsModalOpen(true);
+      setSelectedStudentIds(new Set());
+      await loadData();
+    } catch (err: any) {
+      alert(`Bulk provisioning error: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleRetryFailed = () => {
+    if (!bulkResults) return;
+    const failedIds = bulkResults.results
+      .filter((r) => r.status === 'failed')
+      .map((r) => r.student_id);
+    setSelectedStudentIds(new Set(failedIds));
+    setBulkResultsModalOpen(false);
+    setIsBulkConfirmOpen(true);
+  };
+
   // Data Table Columns Definition
   const columns: Column<Student>[] = [
+    ...(isAdmin
+      ? [
+          {
+            key: 'selection',
+            header: (
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                  checked={
+                    unprovisionedStudents.length > 0 &&
+                    unprovisionedStudents.every((s) => selectedStudentIds.has(s.id))
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      handleSelectAllUnprovisioned();
+                    } else {
+                      handleClearSelection();
+                    }
+                  }}
+                  title="Select or deselect all unprovisioned students"
+                />
+              </div>
+            ),
+            className: 'w-10 text-center px-2',
+            render: (row: Student) => {
+              const isProvisioned = Boolean(row.profile_id || row.email);
+              if (isProvisioned || !row.is_active) {
+                return (
+                  <div
+                    className="flex items-center justify-center"
+                    title={isProvisioned ? 'Portal account already active' : 'Student is inactive'}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700 block opacity-50" />
+                  </div>
+                );
+              }
+              const isSelected = selectedStudentIds.has(row.id);
+              return (
+                <div className="flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => handleToggleSelectStudent(row.id)}
+                    className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                    title={`Select ${row.full_name} for portal activation`}
+                  />
+                </div>
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: 'admission_no',
       header: 'Admission #',
@@ -745,6 +897,66 @@ export const StudentsPage: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Bulk Selection Action Toolbar */}
+      {isAdmin && (
+        <div className="p-3.5 bg-gradient-to-r from-brand-50 to-indigo-50 dark:from-slate-800/90 dark:to-slate-900 border border-brand-200 dark:border-brand-900/50 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-brand-600 text-white rounded-lg shadow-xs">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                Student Portal Provisioning Control
+                {selectedStudentIds.size > 0 ? (
+                  <Badge variant="info">
+                    {selectedStudentIds.size} student{selectedStudentIds.size > 1 ? 's' : ''} selected
+                  </Badge>
+                ) : (
+                  <Badge variant="default">
+                    {unprovisionedStudents.length} unprovisioned
+                  </Badge>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                Select unprovisioned students to activate accounts in bulk or individually
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSelectAllUnprovisioned}
+              disabled={unprovisionedStudents.length === 0}
+            >
+              Select All Unprovisioned ({unprovisionedStudents.length})
+            </Button>
+
+            {selectedStudentIds.size > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearSelection}
+                className="text-slate-600 dark:text-slate-400"
+              >
+                Clear Selection
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={selectedStudentIds.size === 0}
+              onClick={handleStartBulkActivation}
+              leftIcon={<KeyRound className="w-3.5 h-3.5" />}
+            >
+              Bulk Activate Portals ({selectedStudentIds.size})
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Main Student Data Table */}
       <DataTable
@@ -1383,6 +1595,206 @@ export const StudentsPage: React.FC = () => {
         confirmText="Archive Student"
         variant="danger"
       />
+
+      {/* 6. Modal: Bulk Student Portal Activation Confirmation */}
+      <Modal
+        isOpen={isBulkConfirmOpen}
+        onClose={() => setIsBulkConfirmOpen(false)}
+        title={`Bulk Student Portal Activation (${selectedStudentIds.size} Students)`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-blue-900 dark:text-blue-200">
+              <span className="font-semibold">Batch Account Provisioning:</span> Each selected student will be provisioned with an individual authentication account and linked profile. Their login identifier will be automatically derived from their official admission number (e.g. <span className="font-mono font-medium">student.adm20250001@islamiapublic.edu.pk</span>).
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              Default Initial Password
+            </label>
+            <Input
+              type="text"
+              value={bulkPassword}
+              onChange={(e) => setBulkPassword(e.target.value)}
+              placeholder="e.g. Student123!"
+              required
+            />
+            <p className="text-[11px] text-slate-500">
+              This password will be assigned to all newly created student accounts. Students can update their passwords upon login.
+            </p>
+          </div>
+
+          <div>
+            <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2">
+              Selected Students Preview ({selectedStudentIds.size})
+            </div>
+            <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              {displayedStudents
+                .filter((s) => selectedStudentIds.has(s.id))
+                .map((student) => (
+                  <div key={student.id} className="p-2.5 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">{student.full_name}</span>
+                      <span className="ml-2 font-mono text-[11px] text-slate-500">({student.admission_no})</span>
+                    </div>
+                    <span className="font-mono text-[11px] text-brand-600 dark:text-brand-400">
+                      student.{(student.admission_no || 'stu').toLowerCase().replace(/[^a-z0-9]/g, '')}@islamiapublic.edu.pk
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setIsBulkConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleExecuteBulkActivation}
+              leftIcon={<KeyRound className="w-4 h-4" />}
+            >
+              Confirm & Activate {selectedStudentIds.size} Portals
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 7. Modal: Live Bulk Activation Progress */}
+      <Modal
+        isOpen={isBulkProcessing}
+        onClose={() => {}}
+        title="Activating Student Portals..."
+        size="sm"
+      >
+        <div className="py-6 flex flex-col items-center justify-center space-y-4 text-center">
+          <div className="w-12 h-12 rounded-full border-4 border-brand-200 border-t-brand-600 animate-spin" />
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Provisioning Accounts
+            </h4>
+            <p className="text-xs text-slate-500 mt-1">
+              Communicating with Supabase Auth and database... Please do not close this window.
+            </p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 8. Modal: Bulk Activation Operational Report */}
+      <Modal
+        isOpen={bulkResultsModalOpen}
+        onClose={() => setBulkResultsModalOpen(false)}
+        title="Bulk Portal Activation Report"
+        size="lg"
+      >
+        <div className="space-y-4">
+          {bulkResults && (
+            <>
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-4 gap-2">
+                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-center border border-slate-200 dark:border-slate-700">
+                  <div className="text-xs text-slate-500">Requested</div>
+                  <div className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                    {bulkResults.total_requested}
+                  </div>
+                </div>
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl text-center border border-emerald-200 dark:border-emerald-900">
+                  <div className="text-xs text-emerald-700 dark:text-emerald-300">Activated</div>
+                  <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
+                    {bulkResults.success_count}
+                  </div>
+                </div>
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl text-center border border-amber-200 dark:border-amber-900">
+                  <div className="text-xs text-amber-700 dark:text-amber-300">Skipped</div>
+                  <div className="text-lg font-bold text-amber-700 dark:text-amber-300">
+                    {bulkResults.skipped_count}
+                  </div>
+                </div>
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl text-center border border-rose-200 dark:border-rose-900">
+                  <div className="text-xs text-rose-700 dark:text-rose-300">Failed</div>
+                  <div className="text-lg font-bold text-rose-700 dark:text-rose-300">
+                    {bulkResults.failed_count}
+                  </div>
+                </div>
+              </div>
+
+              {/* Results Breakdown Table */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                      <tr>
+                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5">Student</th>
+                        <th className="p-2.5">Admission #</th>
+                        <th className="p-2.5">Email</th>
+                        <th className="p-2.5">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {bulkResults.results.map((r, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5">
+                            <Badge
+                              variant={
+                                r.status === 'success'
+                                  ? 'success'
+                                  : r.status === 'skipped'
+                                  ? 'warning'
+                                  : 'danger'
+                              }
+                            >
+                              {r.status.toUpperCase()}
+                            </Badge>
+                          </td>
+                          <td className="p-2.5 font-medium text-slate-900 dark:text-slate-100">
+                            {r.student_name}
+                          </td>
+                          <td className="p-2.5 font-mono text-slate-500">
+                            {r.admission_no}
+                          </td>
+                          <td className="p-2.5 font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                            {r.email || '—'}
+                          </td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-400">
+                            {r.message}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  {bulkResults.failed_count > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRetryFailed}
+                      leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                      className="text-rose-600 border-rose-300 hover:bg-rose-50"
+                    >
+                      Retry Failed Students ({bulkResults.failed_count})
+                    </Button>
+                  )}
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setBulkResultsModalOpen(false)}
+                >
+                  Close & Refresh
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

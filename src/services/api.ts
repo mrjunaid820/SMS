@@ -1521,6 +1521,249 @@ export const studentApi = {
 
     return { is_active: newActiveState, profile: profiles[pIdx] };
   },
+
+  bulkProvisionStudentAccounts: async (
+    studentIds: string[],
+    defaultPassword?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{
+    success: boolean;
+    total_requested: number;
+    success_count: number;
+    skipped_count: number;
+    failed_count: number;
+    results: Array<{
+      student_id: string;
+      student_name: string;
+      admission_no: string;
+      email: string | null;
+      status: 'success' | 'skipped' | 'failed';
+      message: string;
+    }>;
+  }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to bulk provision student accounts.');
+    }
+
+    if (!studentIds || studentIds.length === 0) {
+      return {
+        success: true,
+        total_requested: 0,
+        success_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        results: [],
+      };
+    }
+
+    const passwordToUse = defaultPassword || 'Student123!';
+
+    if (isLiveSupabaseConfigured()) {
+      // 1. Try atomic PostgreSQL RPC first
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_bulk_provision_students', {
+          p_student_ids: studentIds,
+          p_default_password: passwordToUse,
+        });
+
+        if (!rpcErr && rpcData && typeof rpcData === 'object') {
+          return {
+            success: Boolean(rpcData.success),
+            total_requested: rpcData.total_requested ?? studentIds.length,
+            success_count: rpcData.success_count ?? 0,
+            skipped_count: rpcData.skipped_count ?? 0,
+            failed_count: rpcData.failed_count ?? 0,
+            results: Array.isArray(rpcData.results) ? rpcData.results : [],
+          };
+        }
+      } catch (rpcErr) {
+        console.warn('RPC admin_bulk_provision_students failed, falling back to batch sequential loop:', rpcErr);
+      }
+
+      // 2. Resilient batch sequential fallback if RPC is unavailable
+      const results: Array<{
+        student_id: string;
+        student_name: string;
+        admission_no: string;
+        email: string | null;
+        status: 'success' | 'skipped' | 'failed';
+        message: string;
+      }> = [];
+
+      let successCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+
+      for (const id of studentIds) {
+        try {
+          const { data: stu } = await supabase.from('students').select('*').eq('id', id).single();
+          if (!stu) {
+            results.push({
+              student_id: id,
+              student_name: 'Unknown',
+              admission_no: 'N/A',
+              email: null,
+              status: 'failed',
+              message: 'Student record not found in database.',
+            });
+            failedCount++;
+            continue;
+          }
+
+          if (!stu.is_active) {
+            results.push({
+              student_id: id,
+              student_name: stu.full_name,
+              admission_no: stu.admission_no,
+              email: stu.email || null,
+              status: 'skipped',
+              message: 'Student is archived or inactive.',
+            });
+            skippedCount++;
+            continue;
+          }
+
+          if (stu.profile_id) {
+            results.push({
+              student_id: id,
+              student_name: stu.full_name,
+              admission_no: stu.admission_no,
+              email: stu.email || null,
+              status: 'skipped',
+              message: 'Portal account already active and linked.',
+            });
+            skippedCount++;
+            continue;
+          }
+
+          const cleanAdm = (stu.admission_no || 'stu').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const genEmail = stu.email?.trim() || `student.${cleanAdm}@islamiapublic.edu.pk`;
+
+          await studentApi.provisionStudentAccount(id, genEmail, passwordToUse, actor);
+          results.push({
+            student_id: id,
+            student_name: stu.full_name,
+            admission_no: stu.admission_no,
+            email: genEmail,
+            status: 'success',
+            message: 'Account provisioned successfully.',
+          });
+          successCount++;
+        } catch (err: any) {
+          results.push({
+            student_id: id,
+            student_name: 'Student',
+            admission_no: 'N/A',
+            email: null,
+            status: 'failed',
+            message: err.message || 'Provisioning failed.',
+          });
+          failedCount++;
+        }
+      }
+
+      return {
+        success: true,
+        total_requested: studentIds.length,
+        success_count: successCount,
+        skipped_count: skippedCount,
+        failed_count: failedCount,
+        results,
+      };
+    }
+
+    // 3. LocalStorage/Offline mode
+    const allStudents = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const results: Array<{
+      student_id: string;
+      student_name: string;
+      admission_no: string;
+      email: string | null;
+      status: 'success' | 'skipped' | 'failed';
+      message: string;
+    }> = [];
+
+    let successCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    for (const id of studentIds) {
+      const student = allStudents.find((s) => s.id === id);
+      if (!student) {
+        results.push({
+          student_id: id,
+          student_name: 'Unknown',
+          admission_no: 'N/A',
+          email: null,
+          status: 'failed',
+          message: 'Student record not found.',
+        });
+        failedCount++;
+        continue;
+      }
+
+      if (!student.is_active) {
+        results.push({
+          student_id: id,
+          student_name: student.full_name,
+          admission_no: student.admission_no,
+          email: student.email || null,
+          status: 'skipped',
+          message: 'Student is inactive or archived.',
+        });
+        skippedCount++;
+        continue;
+      }
+
+      if (student.profile_id) {
+        results.push({
+          student_id: id,
+          student_name: student.full_name,
+          admission_no: student.admission_no,
+          email: student.email || null,
+          status: 'skipped',
+          message: 'Portal account already active and linked.',
+        });
+        skippedCount++;
+        continue;
+      }
+
+      try {
+        const cleanAdm = (student.admission_no || 'stu').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const genEmail = student.email?.trim() || `student.${cleanAdm}@islamiapublic.edu.pk`;
+
+        await studentApi.provisionStudentAccount(id, genEmail, passwordToUse, actor);
+        results.push({
+          student_id: id,
+          student_name: student.full_name,
+          admission_no: student.admission_no,
+          email: genEmail,
+          status: 'success',
+          message: 'Account provisioned successfully.',
+        });
+        successCount++;
+      } catch (err: any) {
+        results.push({
+          student_id: id,
+          student_name: student.full_name,
+          admission_no: student.admission_no,
+          email: student.email || null,
+          status: 'failed',
+          message: err.message || 'Failed to provision account.',
+        });
+        failedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      total_requested: studentIds.length,
+      success_count: successCount,
+      skipped_count: skippedCount,
+      failed_count: failedCount,
+      results,
+    };
+  },
 };
 
 // -------------------------------------------------------------

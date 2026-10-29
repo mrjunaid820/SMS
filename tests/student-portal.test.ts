@@ -640,4 +640,59 @@ describe('Student Portal & Identity Architecture Verification', () => {
       expect(content).toContain('accept="image/jpeg,image/png,image/webp,image/gif"');
     });
   });
+
+  describe('11. Single and Bulk Student Portal Activation', () => {
+    const adminActor = { id: 'admin-id', name: 'Principal Abdul Rehman', role: 'admin' };
+    const teacherActor = { id: 'teacher-id', name: 'Muhammad Tariq', role: 'teacher' };
+
+    it('verifies migration 012 exists and contains fixed UUID types and bulk provisioning', () => {
+      const migrationPath = path.resolve(__dirname, '../supabase/migrations/012_fix_uuid_and_bulk_provisioning.sql');
+      expect(fs.existsSync(migrationPath)).toBe(true);
+      const sqlContent = fs.readFileSync(migrationPath, 'utf8');
+
+      expect(sqlContent).toContain('CREATE OR REPLACE FUNCTION public.admin_provision_student');
+      expect(sqlContent).toContain('CREATE OR REPLACE FUNCTION public.admin_bulk_provision_students');
+      expect(sqlContent).toContain('auth.identities');
+      expect(sqlContent).toContain('confirmation_token');
+    });
+
+    it('verifies bulkProvisionStudentAccounts rejects non-admin users', async () => {
+      await expect(
+        studentApi.bulkProvisionStudentAccounts(['some-id'], 'Pass123!', teacherActor)
+      ).rejects.toThrow('Unauthorized: Only administrators are authorized to bulk provision student accounts.');
+    });
+
+    it('successfully provisions multiple students in bulk and skips already provisioned ones', async () => {
+      // 1. Get initial students
+      const allStudents = await studentApi.getStudents();
+      expect(allStudents.length).toBeGreaterThan(0);
+
+      // Pick students without profiles
+      const unprovisioned = allStudents.filter((s) => !s.profile_id);
+      expect(unprovisioned.length).toBeGreaterThan(1);
+
+      const targetIds = [unprovisioned[0].id, unprovisioned[1].id];
+
+      // Execute bulk activation
+      const res = await studentApi.bulkProvisionStudentAccounts(targetIds, 'TestPass123!', adminActor);
+
+      expect(res.success).toBe(true);
+      expect(res.total_requested).toBe(2);
+      expect(res.success_count).toBe(2);
+      expect(res.failed_count).toBe(0);
+      expect(res.skipped_count).toBe(0);
+      expect(res.results.length).toBe(2);
+      expect(res.results[0].status).toBe('success');
+      expect(res.results[1].status).toBe('success');
+      expect(res.results[0].email).toContain('@islamiapublic.edu.pk');
+
+      // Verify second attempt properly skips them
+      const secondRes = await studentApi.bulkProvisionStudentAccounts(targetIds, 'TestPass123!', adminActor);
+      expect(secondRes.success).toBe(true);
+      expect(secondRes.skipped_count).toBe(2);
+      expect(secondRes.success_count).toBe(0);
+      expect(secondRes.results[0].status).toBe('skipped');
+      expect(secondRes.results[1].status).toBe('skipped');
+    });
+  });
 });
