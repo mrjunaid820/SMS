@@ -43,15 +43,15 @@ describe('Student Portal & Identity Architecture Verification', () => {
   });
 
   describe('2. Navigation Constants Integrity & Test Safety', () => {
-    it('preserves existing MAIN_NAV_ITEMS length = 15 and teacher non-admin count = 8', () => {
-      expect(MAIN_NAV_ITEMS.length).toBe(15);
+    it('preserves existing MAIN_NAV_ITEMS length = 16 and teacher non-admin count = 9', () => {
+      expect(MAIN_NAV_ITEMS.length).toBe(16);
       const teacherItems = MAIN_NAV_ITEMS.filter((item) => !item.adminOnly);
-      expect(teacherItems.length).toBe(8);
+      expect(teacherItems.length).toBe(9);
     });
 
     it('defines dedicated STUDENT_NAV_ITEMS with scoped portal items', () => {
       expect(Array.isArray(STUDENT_NAV_ITEMS)).toBe(true);
-      expect(STUDENT_NAV_ITEMS.length).toBe(7);
+      expect(STUDENT_NAV_ITEMS.length).toBe(8);
 
       const paths = STUDENT_NAV_ITEMS.map((item) => item.path);
       expect(paths).toContain('/student-dashboard');

@@ -24,6 +24,7 @@ import { UsersRolesPage } from '@/pages/UsersRoles/UsersRolesPage';
 import { StudentQuickSearchPage } from '@/pages/QuickSearch/StudentQuickSearchPage';
 import { QuizMarksPage } from '@/pages/QuizMarks/QuizMarksPage';
 import { DailyDiaryPage } from '@/pages/DailyDiary/DailyDiaryPage';
+import { EventsAnnouncementsPage } from '@/pages/EventsAnnouncements/EventsAnnouncementsPage';
 import { LoginPage } from '@/pages/Auth/LoginPage';
 
 // Student Portal Modules
@@ -34,6 +35,7 @@ import { MyProfilePage } from '@/pages/StudentPortal/MyProfilePage';
 import { MyFeesPage } from '@/pages/StudentPortal/MyFeesPage';
 import { MyFeeChallansPage } from '@/pages/StudentPortal/MyFeeChallansPage';
 import { MyDuesPage } from '@/pages/StudentPortal/MyDuesPage';
+import { MyAnnouncementsPage } from '@/pages/StudentPortal/MyAnnouncementsPage';
 
 const ProtectedLayout: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -148,6 +150,14 @@ export const App: React.FC = () => {
                   }
                 />
                 <Route
+                  path="/my-announcements"
+                  element={
+                    <StudentRoute>
+                      <MyAnnouncementsPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
                   path="/my-quiz-marks"
                   element={
                     <StudentRoute>
@@ -177,6 +187,7 @@ export const App: React.FC = () => {
                 <Route path="/quick-search" element={<StaffRoute><StudentQuickSearchPage /></StaffRoute>} />
                 <Route path="/quiz-marks" element={<StaffRoute><QuizMarksPage /></StaffRoute>} />
                 <Route path="/daily-diary" element={<StaffRoute><DailyDiaryPage /></StaffRoute>} />
+                <Route path="/events-announcements" element={<StaffRoute><EventsAnnouncementsPage /></StaffRoute>} />
                 
                 {/* Admin Only Protected Routes */}
                 <Route

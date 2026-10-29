@@ -63,6 +63,7 @@ export const MAIN_NAV_ITEMS: NavItemConfig[] = [
   { id: 'subjects', label: 'Subjects', path: '/subjects', iconName: 'BookOpen', category: 'academic' },
   { id: 'teacher-assignments', label: 'Teacher Assignments', path: '/teacher-assignments', iconName: 'UserCheck', adminOnly: true, category: 'academic' },
   { id: 'attendance', label: 'Attendance', path: '/attendance', iconName: 'ClipboardCheck', category: 'academic' },
+  { id: 'events-announcements', label: 'Events & Notices', path: '/events-announcements', iconName: 'Megaphone', category: 'core' },
   { id: 'fees-accounts', label: 'Fees & Accounts', path: '/fees-accounts', iconName: 'Receipt', adminOnly: true, category: 'finance' },
   { id: 'examinations', label: 'Examinations', path: '/examinations', iconName: 'FileSpreadsheet', category: 'academic' },
   { id: 'results-report-cards', label: 'Results & Report Cards', path: '/results-report-cards', iconName: 'Award', category: 'academic' },
@@ -74,6 +75,7 @@ export const MAIN_NAV_ITEMS: NavItemConfig[] = [
 
 export const STUDENT_NAV_ITEMS: NavItemConfig[] = [
   { id: 'student-dashboard', label: 'My Dashboard', path: '/student-dashboard', iconName: 'LayoutDashboard', category: 'core' },
+  { id: 'my-announcements', label: 'Events & Notices', path: '/my-announcements', iconName: 'Megaphone', category: 'core' },
   { id: 'my-fees', label: 'My Fees', path: '/my-fees', iconName: 'Receipt', category: 'finance' },
   { id: 'my-fee-challans', label: 'Fee Challans', path: '/my-fee-challans', iconName: 'FileDown', category: 'finance' },
   { id: 'my-dues', label: 'My Dues', path: '/my-dues', iconName: 'CreditCard', category: 'finance' },

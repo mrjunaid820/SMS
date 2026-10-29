@@ -29,6 +29,14 @@ import {
   DiaryStatus,
   StudentSearchResult,
   StudentAcademicSummary,
+  SchoolAnnouncement,
+  SchoolEvent,
+  AnnouncementCategory,
+  AnnouncementAudience,
+  AnnouncementStatus,
+  EventCategory,
+  EventStatus,
+  AnnouncementRead,
 } from '@/types/database';
 import {
   INITIAL_SCHOOL_SETTINGS,
@@ -52,6 +60,8 @@ import {
   INITIAL_QUIZZES,
   INITIAL_QUIZ_MARKS,
   INITIAL_DAILY_DIARIES,
+  INITIAL_ANNOUNCEMENTS,
+  INITIAL_EVENTS,
 } from './mockData';
 import { generateUUID, calculateGrade, calculateAttendancePercentage } from '@/lib/utils';
 
@@ -3427,12 +3437,17 @@ export const dashboardApi = {
     const attendancePercentage = todayRecords.length > 0 ? Math.round((presentCount / todayRecords.length) * 100) : 0;
     const exams = await examApi.getExams();
     const auditLogs = await auditApi.getLogs();
+    const announcements = await announcementApi.getAnnouncements({ status: 'published' });
+    const upcomingEvents = await eventApi.getUpcomingEvents(5);
 
     return {
       totalActiveStudents: students.length,
       activeTeachers: teachers.filter(t => t.is_active).length,
       totalClasses: classes.length,
       totalSections: sections.length,
+      totalPublishedAnnouncements: announcements.length,
+      recentAnnouncements: announcements.slice(0, 5),
+      upcomingEvents,
       todayAttendance: {
         totalMarked: todayRecords.length,
         present: presentCount,
@@ -4535,6 +4550,12 @@ export const studentPortalApi = {
       attendancePct = attRecords.length > 0 ? Math.round((present / attRecords.length) * 1000) / 10 : 100;
     }
 
+    const studentAnnouncements = await announcementApi.getAnnouncements(
+      { status: 'published' },
+      { id: profileId, role: 'student' }
+    );
+    const upcomingEvents = await eventApi.getUpcomingEvents(5, { id: profileId, role: 'student' });
+
     return {
       student,
       enrollment,
@@ -4543,6 +4564,9 @@ export const studentPortalApi = {
       attendancePct,
       recentQuizzes,
       recentDiaries,
+      recentAnnouncements: studentAnnouncements.slice(0, 5),
+      pinnedAnnouncements: studentAnnouncements.filter((a) => a.is_pinned),
+      upcomingEvents,
     };
   },
 
@@ -4923,5 +4947,646 @@ export const studentPortalApi = {
     return { photo_url: photoUrl };
   },
 };
+
+// -------------------------------------------------------------
+// 15. EVENTS & ANNOUNCEMENTS MODULE API
+// -------------------------------------------------------------
+export const announcementApi = {
+  getAnnouncements: async (
+    filters?: {
+      category?: AnnouncementCategory;
+      status?: AnnouncementStatus;
+      audience?: AnnouncementAudience;
+      classId?: string;
+      sectionId?: string;
+      search?: string;
+      includeExpired?: boolean;
+    },
+    actor?: { id?: string; role?: string; email?: string }
+  ): Promise<SchoolAnnouncement[]> => {
+    let announcements: SchoolAnnouncement[] = [];
+    const today = new Date().toISOString().split('T')[0];
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        let q = supabase
+          .from('school_announcements')
+          .select('*, class:classes(*), section:sections(*), author:profiles(*)');
+
+        if (filters?.status) {
+          q = q.eq('status', filters.status);
+        } else if (actor?.role === 'student') {
+          q = q.eq('status', 'published');
+        }
+
+        if (filters?.category) q = q.eq('category', filters.category);
+        if (filters?.audience) q = q.eq('target_audience', filters.audience);
+        if (filters?.classId) q = q.eq('class_id', filters.classId);
+        if (filters?.sectionId) q = q.eq('section_id', filters.sectionId);
+
+        if (!filters?.includeExpired && actor?.role === 'student') {
+          q = q.lte('publish_date', today);
+          q = q.or(`expiry_date.is.null,expiry_date.gte.${today}`);
+        }
+
+        const { data, error } = await q.order('is_pinned', { ascending: false }).order('publish_date', { ascending: false });
+        if (!error && data) {
+          announcements = data;
+        }
+      } catch (e) {
+        console.warn('Live Supabase query on school_announcements failed, using storage cache:', e);
+      }
+    }
+
+    if (announcements.length === 0) {
+      const stored = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
+      const classes = await academicStructureApi.getClasses();
+      const sections = await academicStructureApi.getSections();
+
+      announcements = stored.map((a) => ({
+        ...a,
+        class: classes.find((c) => c.id === a.class_id),
+        section: sections.find((s) => s.id === a.section_id),
+      }));
+
+      if (filters?.category) {
+        announcements = announcements.filter((a) => a.category === filters.category);
+      }
+      if (filters?.status) {
+        announcements = announcements.filter((a) => a.status === filters.status);
+      } else if (actor?.role === 'student') {
+        announcements = announcements.filter((a) => a.status === 'published');
+      }
+      if (filters?.audience) {
+        announcements = announcements.filter((a) => a.target_audience === filters.audience);
+      }
+      if (filters?.classId) {
+        announcements = announcements.filter((a) => a.class_id === filters.classId);
+      }
+      if (filters?.sectionId) {
+        announcements = announcements.filter((a) => a.section_id === filters.sectionId);
+      }
+      if (!filters?.includeExpired && actor?.role === 'student') {
+        announcements = announcements.filter(
+          (a) => a.publish_date <= today && (!a.expiry_date || a.expiry_date >= today)
+        );
+      }
+    }
+
+    // Role-based visibility scoping
+    if (actor?.role === 'student') {
+      try {
+        const studentInfo = await studentPortalApi.getStudentSelf(actor.id || actor.email || '');
+        const enrolledClassId = studentInfo.enrollment?.section?.class_id || (studentInfo.enrollment as any)?.class_id;
+        const enrolledSectionId = studentInfo.enrollment?.section_id;
+
+        announcements = announcements.filter((a) => {
+          if (a.target_audience === 'all' || a.target_audience === 'students') return true;
+          if (a.target_audience === 'class_section') {
+            if (a.section_id && a.section_id === enrolledSectionId) return true;
+            if (a.class_id && a.class_id === enrolledClassId) return true;
+          }
+          return false;
+        });
+      } catch (e) {
+        announcements = announcements.filter((a) => a.target_audience === 'all' || a.target_audience === 'students');
+      }
+    } else if (actor?.role === 'teacher') {
+      const teachers = await teacherApi.getTeachers();
+      const currentTeacher = teachers.find(
+        (t) => t.email?.toLowerCase() === actor.email?.toLowerCase() || t.profile_id === actor.id
+      );
+      if (currentTeacher) {
+        const assignments = await teacherApi.getAssignments();
+        const myAssignments = assignments.filter((ta) => ta.teacher_id === currentTeacher.id);
+        const mySectionIds = new Set(myAssignments.map((ta) => ta.section_id));
+
+        announcements = announcements.filter((a) => {
+          if (a.author_id === actor.id) return true;
+          if (a.target_audience === 'all' || a.target_audience === 'teachers') return true;
+          if (a.target_audience === 'class_section' && a.section_id && mySectionIds.has(a.section_id)) return true;
+          return false;
+        });
+      }
+    }
+
+    // Attach read tracking if actor user ID is available
+    if (actor?.id) {
+      const reads = getStorage<AnnouncementRead[]>('announcement_reads', []);
+      const readSet = new Set(reads.filter((r) => r.user_id === actor.id).map((r) => r.announcement_id));
+
+      if (isLiveSupabaseConfigured()) {
+        try {
+          const { data: dbReads } = await supabase
+            .from('announcement_reads')
+            .select('announcement_id')
+            .eq('user_id', actor.id);
+          if (dbReads) {
+            dbReads.forEach((r: any) => readSet.add(r.announcement_id));
+          }
+        } catch {}
+      }
+
+      announcements = announcements.map((a) => ({
+        ...a,
+        is_read: readSet.has(a.id),
+      }));
+    }
+
+    // Search filter
+    if (filters?.search && filters.search.trim()) {
+      const term = filters.search.toLowerCase();
+      announcements = announcements.filter(
+        (a) => a.title.toLowerCase().includes(term) || a.content.toLowerCase().includes(term)
+      );
+    }
+
+    // Sort: Pinned first, then newest publish_date descending
+    return announcements.sort((a, b) => {
+      if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+      return new Date(b.publish_date).getTime() - new Date(a.publish_date).getTime();
+    });
+  },
+
+  getAnnouncementById: async (id: string): Promise<SchoolAnnouncement | null> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('school_announcements')
+          .select('*, class:classes(*), section:sections(*), author:profiles(*)')
+          .eq('id', id)
+          .single();
+        if (!error && data) return data;
+      } catch {}
+    }
+    const all = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
+    return all.find((a) => a.id === id) || null;
+  },
+
+  createAnnouncement: async (
+    announcement: Omit<SchoolAnnouncement, 'id' | 'created_at' | 'updated_at'>,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolAnnouncement> => {
+    if (actor?.role && actor.role !== 'admin' && actor.role !== 'teacher') {
+      throw new Error('Unauthorized: Only administrators and authorized faculty can create announcements.');
+    }
+
+    if (!announcement.title?.trim()) {
+      throw new Error('Announcement title is required.');
+    }
+    if (!announcement.content?.trim()) {
+      throw new Error('Announcement content is required.');
+    }
+
+    const newRecord: SchoolAnnouncement = {
+      ...announcement,
+      id: generateUUID(),
+      author_id: actor?.id,
+      publish_date: announcement.publish_date || new Date().toISOString().split('T')[0],
+      status: announcement.status || 'published',
+      is_pinned: Boolean(announcement.is_pinned),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('school_announcements')
+          .insert([
+            {
+              id: newRecord.id,
+              title: newRecord.title,
+              content: newRecord.content,
+              category: newRecord.category,
+              target_audience: newRecord.target_audience,
+              class_id: newRecord.class_id || null,
+              section_id: newRecord.section_id || null,
+              is_pinned: newRecord.is_pinned,
+              status: newRecord.status,
+              publish_date: newRecord.publish_date,
+              expiry_date: newRecord.expiry_date || null,
+              attachment_url: newRecord.attachment_url || null,
+              author_id: newRecord.author_id || null,
+            },
+          ])
+          .select('*, class:classes(*), section:sections(*)')
+          .single();
+
+        if (error) {
+          throw new Error(`Database error saving announcement: ${error.message}`);
+        }
+        if (data) {
+          await logAudit(actor || {}, 'ANNOUNCEMENT_CREATED', 'school_announcements', data.id, {
+            title: data.title,
+            category: data.category,
+            audience: data.target_audience,
+          });
+          return data;
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
+    const updated = [newRecord, ...stored];
+    setStorage('announcements', updated);
+
+    await logAudit(actor || {}, 'ANNOUNCEMENT_CREATED', 'school_announcements', newRecord.id, {
+      title: newRecord.title,
+      category: newRecord.category,
+      audience: newRecord.target_audience,
+    });
+
+    return newRecord;
+  },
+
+  updateAnnouncement: async (
+    id: string,
+    updates: Partial<SchoolAnnouncement>,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolAnnouncement> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const payload: any = { ...updates, updated_at: new Date().toISOString() };
+        delete payload.class;
+        delete payload.section;
+        delete payload.author;
+        delete payload.is_read;
+
+        const { data, error } = await supabase
+          .from('school_announcements')
+          .update(payload)
+          .eq('id', id)
+          .select('*, class:classes(*), section:sections(*)')
+          .single();
+
+        if (error) {
+          throw new Error(`Database error updating announcement: ${error.message}`);
+        }
+        if (data) {
+          await logAudit(actor || {}, 'ANNOUNCEMENT_UPDATED', 'school_announcements', id, updates);
+          return data;
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
+    const idx = stored.findIndex((a) => a.id === id);
+    if (idx === -1) throw new Error('Announcement not found.');
+
+    const updated = {
+      ...stored[idx],
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    stored[idx] = updated;
+    setStorage('announcements', stored);
+
+    await logAudit(actor || {}, 'ANNOUNCEMENT_UPDATED', 'school_announcements', id, updates);
+    return updated;
+  },
+
+  deleteAnnouncement: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<void> => {
+    if (actor?.role && actor.role !== 'admin' && actor.role !== 'teacher') {
+      throw new Error('Unauthorized: Only administrators and authors can delete announcements.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.from('school_announcements').delete().eq('id', id);
+        if (error) {
+          throw new Error(`Database error deleting announcement: ${error.message}`);
+        }
+        await logAudit(actor || {}, 'ANNOUNCEMENT_DELETED', 'school_announcements', id);
+        return;
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
+    const filtered = stored.filter((a) => a.id !== id);
+    setStorage('announcements', filtered);
+
+    await logAudit(actor || {}, 'ANNOUNCEMENT_DELETED', 'school_announcements', id);
+  },
+
+  publishAnnouncement: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolAnnouncement> => {
+    return announcementApi.updateAnnouncement(
+      id,
+      { status: 'published', publish_date: new Date().toISOString().split('T')[0] },
+      actor
+    );
+  },
+
+  archiveAnnouncement: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolAnnouncement> => {
+    return announcementApi.updateAnnouncement(id, { status: 'archived' }, actor);
+  },
+
+  markAsRead: async (announcementId: string, userId: string): Promise<void> => {
+    if (!userId || !announcementId) return;
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        await supabase.rpc('mark_announcement_as_read', { p_announcement_id: announcementId });
+      } catch {
+        try {
+          await supabase
+            .from('announcement_reads')
+            .upsert({ announcement_id: announcementId, user_id: userId, read_at: new Date().toISOString() });
+        } catch {}
+      }
+    }
+
+    const reads = getStorage<AnnouncementRead[]>('announcement_reads', []);
+    if (!reads.some((r) => r.announcement_id === announcementId && r.user_id === userId)) {
+      reads.push({
+        id: generateUUID(),
+        announcement_id: announcementId,
+        user_id: userId,
+        read_at: new Date().toISOString(),
+      });
+      setStorage('announcement_reads', reads);
+    }
+  },
+
+  getUnreadCount: async (
+    userId: string,
+    actor?: { role?: string; email?: string }
+  ): Promise<number> => {
+    if (!userId) return 0;
+    try {
+      const announcements = await announcementApi.getAnnouncements({ status: 'published' }, { id: userId, ...actor });
+      return announcements.filter((a) => !a.is_read).length;
+    } catch {
+      return 0;
+    }
+  },
+};
+
+export const eventApi = {
+  getEvents: async (
+    filters?: {
+      category?: EventCategory;
+      status?: EventStatus;
+      startDate?: string;
+      endDate?: string;
+      classId?: string;
+      sectionId?: string;
+    },
+    actor?: { id?: string; role?: string }
+  ): Promise<SchoolEvent[]> => {
+    let events: SchoolEvent[] = [];
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        let q = supabase.from('school_events').select('*, class:classes(*), section:sections(*), organizer:profiles(*)');
+
+        if (filters?.category) q = q.eq('category', filters.category);
+        if (filters?.status) q = q.eq('status', filters.status);
+        if (filters?.startDate) q = q.gte('event_date', filters.startDate);
+        if (filters?.endDate) q = q.lte('event_date', filters.endDate);
+        if (filters?.classId) q = q.eq('class_id', filters.classId);
+        if (filters?.sectionId) q = q.eq('section_id', filters.sectionId);
+
+        const { data, error } = await q.order('event_date', { ascending: true });
+        if (!error && data) {
+          events = data;
+        }
+      } catch (e) {
+        console.warn('Live Supabase query on school_events failed, using storage cache:', e);
+      }
+    }
+
+    if (events.length === 0) {
+      const stored = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);
+      const classes = await academicStructureApi.getClasses();
+      const sections = await academicStructureApi.getSections();
+
+      events = stored.map((ev) => ({
+        ...ev,
+        class: classes.find((c) => c.id === ev.class_id),
+        section: sections.find((s) => s.id === ev.section_id),
+      }));
+
+      if (filters?.category) events = events.filter((e) => e.category === filters.category);
+      if (filters?.status) events = events.filter((e) => e.status === filters.status);
+      if (filters?.startDate) events = events.filter((e) => e.event_date >= filters.startDate!);
+      if (filters?.endDate) events = events.filter((e) => e.event_date <= filters.endDate!);
+      if (filters?.classId) events = events.filter((e) => e.class_id === filters.classId);
+      if (filters?.sectionId) events = events.filter((e) => e.section_id === filters.sectionId);
+    }
+
+    // Role-based visibility
+    if (actor?.role === 'student') {
+      events = events.filter((e) => e.status !== 'cancelled' && (e.target_audience === 'all' || e.target_audience === 'students'));
+    } else if (actor?.role === 'teacher') {
+      events = events.filter((e) => e.target_audience === 'all' || e.target_audience === 'teachers');
+    }
+
+    return events.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
+  },
+
+  getEventById: async (id: string): Promise<SchoolEvent | null> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('school_events')
+          .select('*, class:classes(*), section:sections(*), organizer:profiles(*)')
+          .eq('id', id)
+          .single();
+        if (!error && data) return data;
+      } catch {}
+    }
+    const all = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);
+    return all.find((e) => e.id === id) || null;
+  },
+
+  createEvent: async (
+    event: Omit<SchoolEvent, 'id' | 'created_at' | 'updated_at'>,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolEvent> => {
+    if (actor?.role && actor.role !== 'admin' && actor.role !== 'teacher') {
+      throw new Error('Unauthorized: Only school administrators and event organizers can create events.');
+    }
+
+    if (!event.title?.trim()) {
+      throw new Error('Event title is required.');
+    }
+    if (!event.event_date) {
+      throw new Error('Event date is required.');
+    }
+
+    const newRecord: SchoolEvent = {
+      ...event,
+      id: generateUUID(),
+      organizer_id: actor?.id,
+      status: event.status || 'scheduled',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('school_events')
+          .insert([
+            {
+              id: newRecord.id,
+              title: newRecord.title,
+              description: newRecord.description || null,
+              category: newRecord.category,
+              event_date: newRecord.event_date,
+              start_time: newRecord.start_time || null,
+              end_time: newRecord.end_time || null,
+              venue: newRecord.venue || null,
+              instructions: newRecord.instructions || null,
+              target_audience: newRecord.target_audience,
+              class_id: newRecord.class_id || null,
+              section_id: newRecord.section_id || null,
+              status: newRecord.status,
+              organizer_id: newRecord.organizer_id || null,
+            },
+          ])
+          .select('*, class:classes(*), section:sections(*)')
+          .single();
+
+        if (error) {
+          throw new Error(`Database error creating event: ${error.message}`);
+        }
+        if (data) {
+          await logAudit(actor || {}, 'EVENT_CREATED', 'school_events', data.id, {
+            title: data.title,
+            event_date: data.event_date,
+          });
+          return data;
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);
+    const updated = [newRecord, ...stored];
+    setStorage('school_events', updated);
+
+    await logAudit(actor || {}, 'EVENT_CREATED', 'school_events', newRecord.id, {
+      title: newRecord.title,
+      event_date: newRecord.event_date,
+    });
+
+    return newRecord;
+  },
+
+  updateEvent: async (
+    id: string,
+    updates: Partial<SchoolEvent>,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<SchoolEvent> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const payload: any = { ...updates, updated_at: new Date().toISOString() };
+        delete payload.class;
+        delete payload.section;
+        delete payload.organizer;
+
+        const { data, error } = await supabase
+          .from('school_events')
+          .update(payload)
+          .eq('id', id)
+          .select('*, class:classes(*), section:sections(*)')
+          .single();
+
+        if (error) {
+          throw new Error(`Database error updating event: ${error.message}`);
+        }
+        if (data) {
+          await logAudit(actor || {}, 'EVENT_UPDATED', 'school_events', id, updates);
+          return data;
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);
+    const idx = stored.findIndex((e) => e.id === id);
+    if (idx === -1) throw new Error('Event not found.');
+
+    const updated = {
+      ...stored[idx],
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    stored[idx] = updated;
+    setStorage('school_events', stored);
+
+    await logAudit(actor || {}, 'EVENT_UPDATED', 'school_events', id, updates);
+    return updated;
+  },
+
+  deleteEvent: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<void> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators can delete school events.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.from('school_events').delete().eq('id', id);
+        if (error) {
+          throw new Error(`Database error deleting event: ${error.message}`);
+        }
+        await logAudit(actor || {}, 'EVENT_DELETED', 'school_events', id);
+        return;
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table')) {
+          throw err;
+        }
+      }
+    }
+
+    const stored = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);
+    const filtered = stored.filter((e) => e.id !== id);
+    setStorage('school_events', filtered);
+
+    await logAudit(actor || {}, 'EVENT_DELETED', 'school_events', id);
+  },
+
+  getUpcomingEvents: async (
+    limit = 5,
+    actor?: { id?: string; role?: string }
+  ): Promise<SchoolEvent[]> => {
+    const today = new Date().toISOString().split('T')[0];
+    const events = await eventApi.getEvents({ startDate: today, status: 'scheduled' }, actor);
+    return events.slice(0, limit);
+  },
+};
+
 
 

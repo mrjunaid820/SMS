@@ -324,8 +324,8 @@ describe('Admin Student & Teacher Editing, Password Restrictions, and Scoping', 
       const adminNav = MAIN_NAV_ITEMS.filter(() => true);
       const teacherNav = MAIN_NAV_ITEMS.filter((item) => !item.adminOnly);
 
-      expect(adminNav.length).toBe(15);
-      expect(teacherNav.length).toBe(8);
+      expect(adminNav.length).toBe(16);
+      expect(teacherNav.length).toBe(9);
 
       const forbiddenForTeachers = [
         'teachers',

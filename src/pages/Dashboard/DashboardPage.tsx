@@ -25,6 +25,10 @@ import {
   ChevronRight,
   ShieldCheck,
   Search,
+  Megaphone,
+  CalendarDays,
+  Pin,
+  MapPin,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -310,6 +314,87 @@ export const DashboardPage: React.FC = () => {
               )}
             </CardContent>
           </Card>
+
+          {/* School Notices & Announcements for Faculty */}
+          <Card className="lg:col-span-2">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                <CardTitle>School Notices & Upcoming Events</CardTitle>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/events-announcements')}
+                className="text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400"
+              >
+                View All &rarr;
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Notices */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    Recent Notices
+                  </span>
+                  {stats.recentAnnouncements && stats.recentAnnouncements.length > 0 ? (
+                    stats.recentAnnouncements.slice(0, 3).map((a: any) => (
+                      <div
+                        key={a.id}
+                        onClick={() => navigate('/events-announcements')}
+                        className="p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 hover:bg-slate-100/60 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">
+                            {a.title}
+                          </span>
+                          <span className="text-[10px] text-slate-400 shrink-0">
+                            {formatDate(a.publish_date)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 line-clamp-1">{a.content}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-400 py-4">No recent notices.</p>
+                  )}
+                </div>
+
+                {/* Events */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                    Upcoming Calendar Events
+                  </span>
+                  {stats.upcomingEvents && stats.upcomingEvents.length > 0 ? (
+                    stats.upcomingEvents.slice(0, 3).map((ev: any) => (
+                      <div
+                        key={ev.id}
+                        className="p-2.5 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">
+                            {ev.title}
+                          </span>
+                          <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 shrink-0">
+                            {formatDate(ev.event_date)}
+                          </span>
+                        </div>
+                        {ev.venue && (
+                          <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                            {ev.venue}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-400 py-4">No events scheduled.</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     );
@@ -358,6 +443,14 @@ export const DashboardPage: React.FC = () => {
             <option value="last_3_months">Last 3 Months</option>
             <option value="all">Entire Academic Year</option>
           </select>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={<Megaphone className="w-3.5 h-3.5" />}
+            onClick={() => navigate('/events-announcements')}
+          >
+            Notices
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -586,6 +679,114 @@ export const DashboardPage: React.FC = () => {
               ))
             ) : (
               <p className="text-xs text-slate-500 text-center py-6">No audit records found.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Institutional Announcements & Calendar Highlights */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Announcements */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Megaphone className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <CardTitle>Institutional Notices & Circulars</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/events-announcements')}
+                className="text-xs"
+              >
+                Manage
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {stats.recentAnnouncements && stats.recentAnnouncements.length > 0 ? (
+              stats.recentAnnouncements.map((a: any) => (
+                <div
+                  key={a.id}
+                  onClick={() => navigate('/events-announcements')}
+                  className="p-3 rounded-lg border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        {a.is_pinned && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                            PINNED
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {a.category}
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 line-clamp-1">
+                        {a.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 line-clamp-1">{a.content}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                      {formatDate(a.publish_date)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 text-center py-6">No recent notices found.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming School Events */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <CardTitle>Upcoming School Activities & Events</CardTitle>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/events-announcements')}
+              className="text-xs"
+            >
+              Calendar
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {stats.upcomingEvents && stats.upcomingEvents.length > 0 ? (
+              stats.upcomingEvents.map((ev: any) => (
+                <div
+                  key={ev.id}
+                  className="p-3 rounded-lg border border-slate-100 dark:border-slate-800 flex items-center justify-between"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {ev.title}
+                      </span>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                        {ev.category}
+                      </span>
+                    </div>
+                    {ev.venue && (
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-rose-500" />
+                        {ev.venue}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
+                    {formatDate(ev.event_date)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500 text-center py-6">No events scheduled.</p>
             )}
           </CardContent>
         </Card>

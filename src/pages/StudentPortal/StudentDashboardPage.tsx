@@ -21,6 +21,10 @@ import {
   Receipt,
   CreditCard,
   FileDown,
+  Megaphone,
+  Pin,
+  CalendarDays,
+  MapPin,
 } from 'lucide-react';
 
 export const StudentDashboardPage: React.FC = () => {
@@ -76,7 +80,18 @@ export const StudentDashboardPage: React.FC = () => {
     );
   }
 
-  const { student, enrollment, quizCount, quizAvgPct, attendancePct, recentQuizzes, recentDiaries } = stats;
+  const {
+    student,
+    enrollment,
+    quizCount,
+    quizAvgPct,
+    attendancePct,
+    recentQuizzes,
+    recentDiaries,
+    recentAnnouncements = [],
+    pinnedAnnouncements = [],
+    upcomingEvents = [],
+  } = stats;
 
   return (
     <div className="space-y-6">
@@ -291,6 +306,125 @@ export const StudentDashboardPage: React.FC = () => {
                       {diary.homework || diary.homework_assigned}
                     </div>
                   )}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* School Circulars & Upcoming Calendar Events */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Important & Recent Notices */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                School Notices & Circulars
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-0.5">Important exam, holiday, and activity broadcasts</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/my-announcements')}
+              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+            >
+              View All
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            {recentAnnouncements.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+                No active announcements for your class.
+              </div>
+            ) : (
+              recentAnnouncements.slice(0, 3).map((a: any) => (
+                <div
+                  key={a.id}
+                  onClick={() => navigate('/my-announcements')}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:border-brand-500 ${
+                    a.is_pinned
+                      ? 'border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10'
+                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5">
+                      {a.is_pinned && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                          <Pin className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                          IMPORTANT
+                        </span>
+                      )}
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        {a.category}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">{formatDate(a.publish_date)}</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 line-clamp-1">
+                    {a.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
+                    {a.content}
+                  </p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming School Events */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <CalendarDays className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Upcoming School Calendar Events
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-0.5">Scheduled dates for academic, sports & arts events</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/my-announcements')}
+              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+            >
+              Calendar
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-0">
+            {upcomingEvents.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+                No upcoming school events scheduled.
+              </div>
+            ) : (
+              upcomingEvents.slice(0, 3).map((ev: any) => (
+                <div
+                  key={ev.id}
+                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                        {ev.title}
+                      </span>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                        {ev.category}
+                      </span>
+                    </div>
+                    {ev.venue && (
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-rose-500" />
+                        {ev.venue}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold text-brand-600 dark:text-brand-400 shrink-0">
+                    {formatDate(ev.event_date)}
+                  </span>
                 </div>
               ))
             )}

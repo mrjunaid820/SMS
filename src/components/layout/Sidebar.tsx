@@ -22,6 +22,7 @@ import {
   UserCog,
   Search,
   CreditCard,
+  Megaphone,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -44,6 +45,7 @@ const iconMap: Record<string, React.ReactNode> = {
   ShieldAlert: <ShieldAlert className="w-4 h-4 shrink-0" />,
   Sliders: <Sliders className="w-4 h-4 shrink-0" />,
   UserCog: <UserCog className="w-4 h-4 shrink-0" />,
+  Megaphone: <Megaphone className="w-4 h-4 shrink-0" />,
 };
 
 export interface SidebarProps {

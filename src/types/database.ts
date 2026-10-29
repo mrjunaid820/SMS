@@ -426,3 +426,86 @@ export interface StudentAcademicSummary {
   }[];
   diaryEntries?: DailyDiary[];
 }
+
+// -------------------------------------------------------------
+// EVENTS & ANNOUNCEMENTS MODULE
+// -------------------------------------------------------------
+export type AnnouncementCategory =
+  | 'general'
+  | 'holiday'
+  | 'exam'
+  | 'meeting'
+  | 'admission'
+  | 'result'
+  | 'sports'
+  | 'celebration'
+  | 'emergency';
+
+export type AnnouncementAudience = 'all' | 'teachers' | 'students' | 'class_section';
+
+export type AnnouncementStatus = 'draft' | 'published' | 'scheduled' | 'archived';
+
+export interface SchoolAnnouncement {
+  id: string;
+  title: string;
+  content: string;
+  category: AnnouncementCategory;
+  target_audience: AnnouncementAudience;
+  class_id?: string;
+  section_id?: string;
+  is_pinned: boolean;
+  status: AnnouncementStatus;
+  publish_date: string; // YYYY-MM-DD
+  expiry_date?: string; // YYYY-MM-DD
+  attachment_url?: string;
+  author_id?: string;
+  created_at: string;
+  updated_at: string;
+  // joined relations
+  class?: ClassLevel;
+  section?: Section;
+  author?: Profile;
+  is_read?: boolean;
+}
+
+export type EventCategory =
+  | 'academic'
+  | 'sports'
+  | 'cultural'
+  | 'holiday'
+  | 'meeting'
+  | 'examination'
+  | 'other';
+
+export type EventStatus = 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
+
+export interface SchoolEvent {
+  id: string;
+  title: string;
+  description?: string;
+  category: EventCategory;
+  event_date: string; // YYYY-MM-DD
+  start_time?: string; // HH:MM:SS
+  end_time?: string; // HH:MM:SS
+  venue?: string;
+  instructions?: string;
+  target_audience: AnnouncementAudience;
+  class_id?: string;
+  section_id?: string;
+  status: EventStatus;
+  organizer_id?: string;
+  created_at: string;
+  updated_at: string;
+  // joined relations
+  class?: ClassLevel;
+  section?: Section;
+  organizer?: Profile;
+}
+
+export interface AnnouncementRead {
+  id: string;
+  announcement_id: string;
+  user_id: string;
+  read_at: string;
+}
+

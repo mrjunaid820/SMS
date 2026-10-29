@@ -21,6 +21,9 @@ import {
   Quiz,
   QuizMark,
   DailyDiary,
+  SchoolAnnouncement,
+  SchoolEvent,
+  AnnouncementRead,
 } from '@/types/database';
 
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
@@ -882,3 +885,140 @@ export const INITIAL_DAILY_DIARIES: DailyDiary[] = [
     updated_at: '2025-05-13T12:00:00Z',
   },
 ];
+
+// =============================================================
+// EVENTS & ANNOUNCEMENTS
+// =============================================================
+export const INITIAL_ANNOUNCEMENTS: SchoolAnnouncement[] = [
+  {
+    id: 'e1000000-0000-0000-0000-000000000001',
+    title: 'Mid-Term Examinations 2025-2026 Schedule',
+    content:
+      'All faculty members, parents, and students are notified that Mid-Term Examinations will commence on October 15, 2025. Detailed date sheets have been published under the Examinations section. Roll number slips and syllabus guidelines are distributed by class teachers.',
+    category: 'exam',
+    target_audience: 'all',
+    is_pinned: true,
+    status: 'published',
+    publish_date: '2026-10-20',
+    expiry_date: '2026-11-20',
+    author_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-20T08:00:00Z',
+    updated_at: '2026-10-20T08:00:00Z',
+  },
+  {
+    id: 'e1000000-0000-0000-0000-000000000002',
+    title: 'Annual Inter-School Sports Gala 2026',
+    content:
+      'The Annual Sports Gala is scheduled for next month. Competitions will include Cricket, Football, Badminton, Table Tennis, and 100m Athletics. Students interested in participating must register with Master Muhammad Tariq or Sir Asif Mehmood by Friday.',
+    category: 'sports',
+    target_audience: 'all',
+    is_pinned: true,
+    status: 'published',
+    publish_date: '2026-10-25',
+    expiry_date: '2026-11-25',
+    author_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-25T09:00:00Z',
+    updated_at: '2026-10-25T09:00:00Z',
+  },
+  {
+    id: 'e1000000-0000-0000-0000-000000000003',
+    title: 'Staff Academic Review Meeting',
+    content:
+      'A mandatory academic coordination meeting for all Senior and Junior teaching staff will be held in the Conference Hall on Saturday at 1:30 PM. Agenda includes mid-term syllabus progress and daily diary compliance.',
+    category: 'meeting',
+    target_audience: 'teachers',
+    is_pinned: false,
+    status: 'published',
+    publish_date: '2026-10-28',
+    expiry_date: '2026-11-05',
+    author_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-28T10:00:00Z',
+    updated_at: '2026-10-28T10:00:00Z',
+  },
+  {
+    id: 'e1000000-0000-0000-0000-000000000004',
+    title: 'Iqbal Day Commemoration & Speech Contest',
+    content:
+      'Islamia Public High School will observe Iqbal Day with an inter-class speech and poetry recitation competition. Winning students will be awarded certificates and shields during the morning assembly.',
+    category: 'celebration',
+    target_audience: 'students',
+    is_pinned: false,
+    status: 'published',
+    publish_date: '2026-10-29',
+    expiry_date: '2026-11-15',
+    author_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-29T11:00:00Z',
+    updated_at: '2026-10-29T11:00:00Z',
+  },
+  {
+    id: 'e1000000-0000-0000-0000-000000000005',
+    title: 'Class 9 Science Practical Lab Guidelines',
+    content:
+      'All matric Part 1 science students are requested to bring their chemistry and physics practical workbooks for lab inspection this Thursday.',
+    category: 'general',
+    target_audience: 'class_section',
+    class_id: 'c0000000-0000-0000-0000-000000000004',
+    section_id: 'd0000000-0000-0000-0000-000000000001',
+    is_pinned: false,
+    status: 'published',
+    publish_date: '2026-10-29',
+    expiry_date: '2026-11-10',
+    author_id: '90000000-0000-0000-0000-000000000002',
+    created_at: '2026-10-29T12:00:00Z',
+    updated_at: '2026-10-29T12:00:00Z',
+  },
+];
+
+export const INITIAL_EVENTS: SchoolEvent[] = [
+  {
+    id: 'e2000000-0000-0000-0000-000000000001',
+    title: 'Annual Science & Robotics Exhibition',
+    description:
+      'Live working models and projects prepared by Matric Part 1 & Part 2 science students. Parents and external educational evaluators are invited.',
+    category: 'academic',
+    event_date: '2026-11-05',
+    start_time: '09:00:00',
+    end_time: '13:30:00',
+    venue: 'School Main Auditorium & Physics Lab',
+    instructions: 'All participating groups must set up their stalls by 08:30 AM in proper school uniform.',
+    target_audience: 'all',
+    status: 'scheduled',
+    organizer_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-20T08:00:00Z',
+    updated_at: '2026-10-20T08:00:00Z',
+  },
+  {
+    id: 'e2000000-0000-0000-0000-000000000002',
+    title: 'Parent-Teacher Coordination Conference (PTM)',
+    description:
+      'Discussion of Mid-Term examination results, student attendance percentages, and behavioral performance.',
+    category: 'meeting',
+    event_date: '2026-11-10',
+    start_time: '08:30:00',
+    end_time: '12:30:00',
+    venue: 'Classrooms 101 to 204',
+    instructions: 'Parents are requested to bring student fee receipts and previous progress cards.',
+    target_audience: 'all',
+    status: 'scheduled',
+    organizer_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-22T08:00:00Z',
+    updated_at: '2026-10-22T08:00:00Z',
+  },
+  {
+    id: 'e2000000-0000-0000-0000-000000000003',
+    title: 'Inter-House Cricket Championship Final',
+    description: 'Final clash between Jinnah House and Iqbal House for the 2025-26 School Championship Trophy.',
+    category: 'sports',
+    event_date: '2026-11-15',
+    start_time: '10:00:00',
+    end_time: '14:00:00',
+    venue: 'School Cricket Ground',
+    instructions: 'Spectator students must sit in their designated house enclosures.',
+    target_audience: 'students',
+    status: 'scheduled',
+    organizer_id: '90000000-0000-0000-0000-000000000001',
+    created_at: '2026-10-25T08:00:00Z',
+    updated_at: '2026-10-25T08:00:00Z',
+  },
+];
+

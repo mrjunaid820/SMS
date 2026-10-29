@@ -23,11 +23,11 @@ describe('Security, Scoping and Data Integrity Rules', () => {
 
   it('filters navigation items strictly so teachers cannot see admin-only routes', () => {
     const adminNav = MAIN_NAV_ITEMS.filter((item) => true);
-    expect(adminNav.length).toBe(15);
+    expect(adminNav.length).toBe(16);
 
     const teacherNav = MAIN_NAV_ITEMS.filter((item) => !item.adminOnly);
     // Teacher should not see: Teachers, Academic Sessions, Teacher Assignments, Fees & Accounts, Audit Logs, School Settings, Users & Roles
-    expect(teacherNav.length).toBe(8);
+    expect(teacherNav.length).toBe(9);
     expect(teacherNav.some((item) => item.id === 'fees-accounts')).toBe(false);
     expect(teacherNav.some((item) => item.id === 'audit-logs')).toBe(false);
     expect(teacherNav.some((item) => item.id === 'school-settings')).toBe(false);
