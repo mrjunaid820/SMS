@@ -1132,94 +1132,57 @@ export const studentApi = {
         throw new Error(`Validation Error: An account with email "${cleanEmail}" is already registered.`);
       }
 
-      // 3. Try server-side Edge Function first
+      // 3. Primary mechanism: Atomic PostgreSQL RPC with SECURITY DEFINER
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_provision_student', {
+          p_student_id: studentId,
+          p_email: cleanEmail,
+          p_password: options.temporaryPassword || 'Student123!',
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          const [profRes, stuRes] = await Promise.all([
+            supabase.from('profiles').select('*').eq('id', rpcData.user_id).single(),
+            supabase.from('students').select('*').eq('id', studentId).single(),
+          ]);
+
+          if (profRes.data && stuRes.data) {
+            return { profile: profRes.data, student: stuRes.data };
+          }
+        } else if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('function public.admin_provision_student')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('function public.admin_provision_student')) {
+          throw err;
+        }
+      }
+
+      // 4. Secondary mechanism: Try Edge Function if deployed
       try {
         const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
           body: {
             action: 'provision_student',
             studentId,
             email: cleanEmail,
-            temporaryPassword: options.temporaryPassword,
+            temporaryPassword: options.temporaryPassword || 'Student123!',
           },
         });
 
         if (!edgeErr && edgeData && edgeData.success && edgeData.profile && edgeData.student) {
           return { profile: edgeData.profile, student: edgeData.student };
+        } else if (edgeErr && edgeErr.status !== 404) {
+          throw new Error(edgeErr.message || 'Edge function error');
         }
-      } catch (err) {
-        // Fall back to client auth creation if edge function not yet deployed
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Failed to send a request') && !err.message.includes('non-2xx') && !err.message.includes('FunctionsHttpError')) {
+          throw err;
+        }
       }
 
-      // 4. Client fallback: Create auth user with isolated, non-persisting client
-      const rawUrl = import.meta.env.VITE_SUPABASE_URL;
-      const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const standaloneAuth = createClient(rawUrl, rawKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-
-      const { data: signUpData, error: signUpErr } = await standaloneAuth.auth.signUp({
-        email: cleanEmail,
-        password: options.temporaryPassword || 'Student123!',
-        options: {
-          data: {
-            role: 'student',
-            full_name: liveStudent.full_name,
-          },
-        },
-      });
-
-      if (signUpErr || !signUpData.user) {
-        throw new Error(`Supabase Auth account creation failed: ${signUpErr?.message || 'Unknown error'}`);
-      }
-
-      const newUserId = signUpData.user.id;
-
-      // 5. Insert public.profiles
-      const newProfile: Profile = {
-        id: newUserId,
-        role: 'student',
-        full_name: liveStudent.full_name,
-        email: cleanEmail,
-        phone: liveStudent.guardian_phone || undefined,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const { data: insertedProfile, error: pInsertErr } = await supabase
-        .from('profiles')
-        .insert([newProfile])
-        .select()
-        .single();
-
-      if (pInsertErr) {
-        throw new Error(`Failed to create student user profile: ${pInsertErr.message}`);
-      }
-
-      // 6. Link to public.students
-      const { data: updatedStudent, error: sUpdErr } = await supabase
-        .from('students')
-        .update({
-          profile_id: newUserId,
-          email: cleanEmail,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', studentId)
-        .select()
-        .single();
-
-      if (sUpdErr) {
-        throw new Error(`Failed to link login account to student record: ${sUpdErr.message}`);
-      }
-
-      await logAudit(actor || {}, 'STUDENT_ACCOUNT_PROVISIONED', 'students', studentId, {
-        profile_id: newUserId,
-        student_admission_no: liveStudent.admission_no,
-        email: cleanEmail,
-        method: options.temporaryPassword ? 'TEMPORARY_PASSWORD_ASSIGNED' : 'INVITATION_LINK_DISPATCHED',
-      });
-
-      return { profile: insertedProfile, student: updatedStudent };
+      throw new Error(
+        'Student portal provisioning requires database Migration 011 (admin_provision_student RPC) to be executed in the Supabase SQL Editor.'
+      );
     }
 
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
@@ -1345,7 +1308,31 @@ export const studentApi = {
         }
       }
 
-      // Try Edge Function if temporaryPassword requested
+      // 1. Try Atomic PostgreSQL RPC first if temporaryPassword requested
+      if (options.temporaryPassword) {
+        try {
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_reset_student_password', {
+            p_student_id: studentId,
+            p_new_password: options.temporaryPassword,
+          });
+
+          if (!rpcErr && rpcData && rpcData.success) {
+            return {
+              success: true,
+              profileId: targetProfileId || undefined,
+              message: `Password updated successfully for ${liveStudent.full_name}. Student can log in immediately with the new password.`,
+            };
+          } else if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('function public.admin_reset_student_password')) {
+            throw new Error(rpcErr.message);
+          }
+        } catch (err: any) {
+          if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('function public.admin_reset_student_password')) {
+            throw err;
+          }
+        }
+      }
+
+      // 2. Try Edge Function if temporaryPassword requested
       if (options.temporaryPassword && targetProfileId) {
         try {
           const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {

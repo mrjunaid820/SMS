@@ -312,9 +312,9 @@ export const StudentsPage: React.FC = () => {
     setPortalStudent(student);
     setPortalError(null);
     setPortalSuccess(null);
-    setPortalPassword('');
+    setPortalPassword('Student123!');
     if (student.email) {
-      setPortalEmail(student.email);
+      setPortalEmail(student.email.trim());
     } else {
       const sanitizedAdmission = (student.admission_no || 'stu')
         .toLowerCase()
@@ -330,8 +330,9 @@ export const StudentsPage: React.FC = () => {
     setPortalError(null);
     setPortalSuccess(null);
 
-    if (!portalEmail.trim()) {
-      setPortalError('Please provide a valid login email address.');
+    const cleanEmail = portalEmail.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setPortalError('Please provide a valid login email address (e.g. student.adm001@islamiapublic.edu.pk).');
       return;
     }
     if (!portalPassword || portalPassword.length < 6) {
@@ -343,11 +344,11 @@ export const StudentsPage: React.FC = () => {
     try {
       const res = await studentApi.provisionStudentAccount(
         portalStudent.id,
-        portalEmail.trim(),
+        cleanEmail,
         portalPassword,
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
-      setPortalSuccess(`Portal account provisioned successfully for ${portalStudent.full_name} (${res.profile.email}).`);
+      setPortalSuccess(`Portal account provisioned successfully! Login email: ${res.profile.email}. Initial password: ${portalPassword}`);
       await loadData();
       setPortalStudent((prev) => (prev ? { ...prev, profile_id: res.profile.id, email: res.profile.email } : null));
     } catch (err: any) {
