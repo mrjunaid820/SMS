@@ -65,6 +65,7 @@ export interface Teacher {
   joining_date: string;
   designation: string;
   is_active: boolean;
+  portal_status?: 'not_provisioned' | 'active' | 'inactive';
   created_at: string;
 }
 
@@ -102,6 +103,7 @@ export interface Student {
   photo_url?: string;
   blood_group?: string;
   is_active: boolean;
+  portal_status?: 'not_provisioned' | 'active' | 'inactive';
   archived_at?: string;
   archive_reason?: string;
   created_at: string;

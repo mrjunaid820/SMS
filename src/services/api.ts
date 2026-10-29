@@ -263,9 +263,39 @@ export const teacherApi = {
   getTeachers: async (): Promise<Teacher[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('teachers').select('*').order('employee_id');
-      if (!error && data) return data;
+      if (!error && data) {
+        const profileIds = data.filter((t: any) => t.profile_id).map((t: any) => t.profile_id);
+        const profileStatusMap = new Map<string, boolean>();
+        if (profileIds.length > 0) {
+          try {
+            const { data: profs } = await supabase.from('profiles').select('id, is_active').in('id', profileIds);
+            if (profs) {
+              profs.forEach((p: any) => profileStatusMap.set(p.id, p.is_active));
+            }
+          } catch (e) {
+            console.warn('Could not batch query teacher profile statuses:', e);
+          }
+        }
+        return data.map((t: any) => {
+          let portal_status: 'not_provisioned' | 'active' | 'inactive' = 'not_provisioned';
+          if (t.profile_id) {
+            const isActive = profileStatusMap.get(t.profile_id);
+            portal_status = isActive === false || t.is_active === false ? 'inactive' : 'active';
+          }
+          return { ...t, portal_status };
+        });
+      }
     }
-    return getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    return teachers.map((t) => {
+      let portal_status: 'not_provisioned' | 'active' | 'inactive' = 'not_provisioned';
+      if (t.profile_id) {
+        const prof = profiles.find((p) => p.id === t.profile_id);
+        portal_status = (prof && prof.is_active === false) || t.is_active === false ? 'inactive' : 'active';
+      }
+      return { ...t, portal_status };
+    });
   },
 
   createTeacher: async (teacher: Omit<Teacher, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Teacher> => {
@@ -938,6 +968,160 @@ export const teacherApi = {
     }
   },
 
+  setPortalActive: async (
+    teacherId: string,
+    active: boolean,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; portal_status: 'active' | 'inactive' }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to toggle teacher portal access.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_set_teacher_portal_active', {
+          p_teacher_id: teacherId,
+          p_active: active,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          return {
+            success: true,
+            message: rpcData.message || (active ? 'Teacher portal reactivated successfully.' : 'Teacher portal deactivated successfully.'),
+            portal_status: active ? 'active' : 'inactive',
+          };
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_set_teacher_portal_active')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('admin_set_teacher_portal_active')) {
+          throw err;
+        }
+      }
+
+      const { data: teacher, error: tErr } = await supabase.from('teachers').select('*').eq('id', teacherId).single();
+      if (tErr || !teacher) throw new Error('Teacher record not found.');
+
+      await supabase.from('teachers').update({ is_active: active }).eq('id', teacherId);
+      if (teacher.profile_id) {
+        await supabase.from('profiles').update({ is_active: active, updated_at: new Date().toISOString() }).eq('id', teacher.profile_id);
+      }
+
+      await logAudit(
+        actor || {},
+        active ? 'TEACHER_PORTAL_REACTIVATED' : 'TEACHER_PORTAL_DEACTIVATED',
+        'teachers',
+        teacherId,
+        { teacher_name: teacher.full_name, new_status: active ? 'active' : 'inactive' }
+      );
+
+      return {
+        success: true,
+        message: active ? 'Teacher portal reactivated successfully.' : 'Teacher portal deactivated successfully.',
+        portal_status: active ? 'active' : 'inactive',
+      };
+    }
+
+    const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
+    const tIdx = teachers.findIndex((t) => t.id === teacherId);
+    if (tIdx === -1) throw new Error('Teacher record not found.');
+
+    teachers[tIdx] = { ...teachers[tIdx], is_active: active };
+    setStorage('teachers', [...teachers]);
+
+    if (teachers[tIdx].profile_id) {
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+      const pIdx = profiles.findIndex((p) => p.id === teachers[tIdx].profile_id);
+      if (pIdx !== -1) {
+        profiles[pIdx] = { ...profiles[pIdx], is_active: active, updated_at: new Date().toISOString() };
+        setStorage('profiles', [...profiles]);
+      }
+    }
+
+    await logAudit(
+      actor || {},
+      active ? 'TEACHER_PORTAL_REACTIVATED' : 'TEACHER_PORTAL_DEACTIVATED',
+      'teachers',
+      teacherId,
+      { teacher_name: teachers[tIdx].full_name, new_status: active ? 'active' : 'inactive' }
+    );
+
+    return {
+      success: true,
+      message: active ? 'Teacher portal reactivated successfully.' : 'Teacher portal deactivated successfully.',
+      portal_status: active ? 'active' : 'inactive',
+    };
+  },
+
+  bulkSetPortalActive: async (
+    teacherIds: string[],
+    active: boolean,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{
+    success: boolean;
+    total: number;
+    successCount: number;
+    skippedCount: number;
+    failedCount: number;
+    results: any[];
+  }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to perform bulk teacher portal operations.');
+    }
+
+    if (!teacherIds || teacherIds.length === 0) {
+      return { success: true, total: 0, successCount: 0, skippedCount: 0, failedCount: 0, results: [] };
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_bulk_set_teacher_portal_active', {
+          p_teacher_ids: teacherIds,
+          p_active: active,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          return {
+            success: true,
+            total: rpcData.total_requested || teacherIds.length,
+            successCount: rpcData.success_count || 0,
+            skippedCount: rpcData.skipped_count || 0,
+            failedCount: rpcData.failed_count || 0,
+            results: rpcData.results || [],
+          };
+        }
+      } catch (e) {
+        console.warn('RPC admin_bulk_set_teacher_portal_active fallback to sequential:', e);
+      }
+    }
+
+    let successCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    const results: any[] = [];
+
+    for (const id of teacherIds) {
+      try {
+        const res = await teacherApi.setPortalActive(id, active, actor);
+        successCount++;
+        results.push({ teacher_id: id, status: 'success', message: res.message });
+      } catch (err: any) {
+        failedCount++;
+        results.push({ teacher_id: id, status: 'failed', error: err.message });
+      }
+    }
+
+    return {
+      success: true,
+      total: teacherIds.length,
+      successCount,
+      skippedCount,
+      failedCount,
+      results,
+    };
+  },
+
   getAssignments: async (sessionId?: string): Promise<TeacherAssignment[]> => {
     if (isLiveSupabaseConfigured()) {
       let query = supabase.from('teacher_assignments').select('*, teacher:teachers(*), section:sections(*, class:classes(*)), subject:subjects(*), academic_session:academic_sessions(*)');
@@ -998,10 +1182,40 @@ export const studentApi = {
       let query = supabase.from('students').select('*').order('admission_no', { ascending: true });
       if (!includeArchived) query = query.eq('is_active', true);
       const { data, error } = await query;
-      if (!error && data) return data;
+      if (!error && data) {
+        const profileIds = data.filter((s: any) => s.profile_id).map((s: any) => s.profile_id);
+        const profileStatusMap = new Map<string, boolean>();
+        if (profileIds.length > 0) {
+          try {
+            const { data: profs } = await supabase.from('profiles').select('id, is_active').in('id', profileIds);
+            if (profs) {
+              profs.forEach((p: any) => profileStatusMap.set(p.id, p.is_active));
+            }
+          } catch (e) {
+            console.warn('Could not batch query student profile statuses:', e);
+          }
+        }
+        return data.map((s: any) => {
+          let portal_status: 'not_provisioned' | 'active' | 'inactive' = 'not_provisioned';
+          if (s.profile_id) {
+            const isActive = profileStatusMap.get(s.profile_id);
+            portal_status = isActive === false ? 'inactive' : 'active';
+          }
+          return { ...s, portal_status };
+        });
+      }
     }
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
-    return includeArchived ? students : students.filter(s => s.is_active);
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const filtered = includeArchived ? students : students.filter((s) => s.is_active);
+    return filtered.map((s) => {
+      let portal_status: 'not_provisioned' | 'active' | 'inactive' = 'not_provisioned';
+      if (s.profile_id) {
+        const prof = profiles.find((p) => p.id === s.profile_id);
+        portal_status = prof && prof.is_active === false ? 'inactive' : 'active';
+      }
+      return { ...s, portal_status };
+    });
   },
 
   getStudentById: async (id: string): Promise<Student | null> => {
@@ -1967,6 +2181,390 @@ export const studentApi = {
       skipped_count: skippedCount,
       failed_count: failedCount,
       results,
+    };
+  },
+
+  setPortalActive: async (
+    studentId: string,
+    active: boolean,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; portal_status: 'active' | 'inactive'; message: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to toggle student portal access.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_set_student_portal_active', {
+          p_student_id: studentId,
+          p_active: active,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          return {
+            success: true,
+            portal_status: rpcData.portal_status || (active ? 'active' : 'inactive'),
+            message: rpcData.message || (active ? 'Student portal reactivated successfully.' : 'Student portal deactivated successfully.'),
+          };
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_set_student_portal_active')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('admin_set_student_portal_active')) {
+          throw err;
+        }
+      }
+
+      // Direct Supabase fallback
+      const { data: student, error: sErr } = await supabase.from('students').select('*').eq('id', studentId).single();
+      if (sErr || !student) throw new Error('Student record not found in database.');
+      if (!student.profile_id) throw new Error('Student does not have a provisioned portal account.');
+
+      const { data: prof, error: pErr } = await supabase
+        .from('profiles')
+        .update({ is_active: active, updated_at: new Date().toISOString() })
+        .eq('id', student.profile_id)
+        .select()
+        .single();
+      if (pErr) throw pErr;
+
+      await logAudit(
+        actor || {},
+        active ? 'STUDENT_PORTAL_REACTIVATED' : 'STUDENT_PORTAL_DEACTIVATED',
+        'students',
+        studentId,
+        { student_name: student.full_name, new_portal_status: active ? 'active' : 'inactive' }
+      );
+
+      return {
+        success: true,
+        portal_status: active ? 'active' : 'inactive',
+        message: active ? 'Student portal reactivated successfully.' : 'Student portal deactivated successfully.',
+      };
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const student = students.find((s) => s.id === studentId);
+    if (!student) throw new Error('Student record not found.');
+    if (!student.profile_id) throw new Error('Student does not have a provisioned portal account.');
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const pIdx = profiles.findIndex((p) => p.id === student.profile_id);
+    if (pIdx === -1) throw new Error('Linked portal profile not found.');
+
+    profiles[pIdx] = { ...profiles[pIdx], is_active: active, updated_at: new Date().toISOString() };
+    setStorage('profiles', [...profiles]);
+
+    await logAudit(
+      actor || {},
+      active ? 'STUDENT_PORTAL_REACTIVATED' : 'STUDENT_PORTAL_DEACTIVATED',
+      'students',
+      studentId,
+      { student_name: student.full_name, new_portal_status: active ? 'active' : 'inactive' }
+    );
+
+    return {
+      success: true,
+      portal_status: active ? 'active' : 'inactive',
+      message: active ? 'Student portal reactivated successfully.' : 'Student portal deactivated successfully.',
+    };
+  },
+
+  bulkSetPortalActive: async (
+    studentIds: string[],
+    active: boolean,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{
+    success: boolean;
+    total_requested: number;
+    success_count: number;
+    skipped_count: number;
+    failed_count: number;
+    results: Array<{
+      student_id: string;
+      full_name?: string;
+      status: 'success' | 'skipped' | 'failed';
+      portal_status?: 'active' | 'inactive';
+      message?: string;
+      error?: string;
+    }>;
+  }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to perform bulk student portal operations.');
+    }
+
+    if (!studentIds || studentIds.length === 0) {
+      return { success: true, total_requested: 0, success_count: 0, skipped_count: 0, failed_count: 0, results: [] };
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_bulk_set_student_portal_active', {
+          p_student_ids: studentIds,
+          p_active: active,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          return {
+            success: true,
+            total_requested: rpcData.total_requested || studentIds.length,
+            success_count: rpcData.success_count || 0,
+            skipped_count: rpcData.skipped_count || 0,
+            failed_count: rpcData.failed_count || 0,
+            results: Array.isArray(rpcData.results) ? rpcData.results : [],
+          };
+        }
+      } catch (e) {
+        console.warn('RPC admin_bulk_set_student_portal_active fallback to sequential:', e);
+      }
+    }
+
+    let success_count = 0;
+    let skipped_count = 0;
+    let failed_count = 0;
+    const results: any[] = [];
+
+    for (const id of studentIds) {
+      try {
+        const res = await studentApi.setPortalActive(id, active, actor);
+        success_count++;
+        results.push({ student_id: id, status: 'success', portal_status: res.portal_status, message: res.message });
+      } catch (err: any) {
+        if (err.message && err.message.includes('does not have a provisioned')) {
+          skipped_count++;
+          results.push({ student_id: id, status: 'skipped', message: err.message });
+        } else {
+          failed_count++;
+          results.push({ student_id: id, status: 'failed', error: err.message });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      total_requested: studentIds.length,
+      success_count,
+      skipped_count,
+      failed_count,
+      results,
+    };
+  },
+
+  checkDeletionEligibility: async (
+    studentId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{
+    student_id: string;
+    student_name: string;
+    admission_no: string;
+    has_dependencies: boolean;
+    eligible_for_permanent_deletion: boolean;
+    recommendation: 'archive_recommended' | 'permanent_deletion';
+    dependencies: {
+      enrollments: number;
+      attendance_records: number;
+      fee_invoices: number;
+      fee_payments: number;
+      exam_marks: number;
+    };
+    explanation: string;
+  }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to check student deletion dependencies.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_check_student_deletion_eligibility', {
+          p_student_id: studentId,
+        });
+
+        if (!rpcErr && rpcData && typeof rpcData === 'object') {
+          return rpcData as any;
+        }
+      } catch (e) {
+        console.warn('RPC admin_check_student_deletion_eligibility fallback:', e);
+      }
+
+      const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
+      if (!student) throw new Error('Student record not found in database.');
+
+      const { data: enrs } = await supabase.from('enrollments').select('id').eq('student_id', studentId);
+      const enrIds = (enrs || []).map((e: any) => e.id);
+
+      let attendanceCount = 0;
+      let invoiceCount = 0;
+      let paymentCount = 0;
+      let marksCount = 0;
+
+      if (enrIds.length > 0) {
+        const [attRes, invRes, markRes] = await Promise.all([
+          supabase.from('attendance').select('id', { count: 'exact', head: true }).in('enrollment_id', enrIds),
+          supabase.from('fee_invoices').select('id').in('enrollment_id', enrIds),
+          supabase.from('marks').select('id', { count: 'exact', head: true }).in('enrollment_id', enrIds),
+        ]);
+        attendanceCount = attRes.count || 0;
+        const invoices = invRes.data || [];
+        invoiceCount = invoices.length;
+        if (invoices.length > 0) {
+          const invIds = invoices.map((i: any) => i.id);
+          const payRes = await supabase.from('fee_payments').select('id', { count: 'exact', head: true }).in('invoice_id', invIds);
+          paymentCount = payRes.count || 0;
+        }
+        marksCount = markRes.count || 0;
+      }
+
+      const hasDeps = attendanceCount > 0 || invoiceCount > 0 || paymentCount > 0 || marksCount > 0;
+      return {
+        student_id: studentId,
+        student_name: student.full_name,
+        admission_no: student.admission_no,
+        has_dependencies: hasDeps,
+        eligible_for_permanent_deletion: !hasDeps,
+        recommendation: hasDeps ? 'archive_recommended' : 'permanent_deletion',
+        dependencies: {
+          enrollments: enrIds.length,
+          attendance_records: attendanceCount,
+          fee_invoices: invoiceCount,
+          fee_payments: paymentCount,
+          exam_marks: marksCount,
+        },
+        explanation: hasDeps
+          ? `Student has ${attendanceCount} attendance records, ${invoiceCount} fee invoices, ${paymentCount} fee payments, and ${marksCount} exam marks. To preserve financial and academic history, please use "Archive Student" instead of permanent deletion.`
+          : 'Student has no academic or financial history. Record is eligible for permanent removal.',
+      };
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const student = students.find((s) => s.id === studentId);
+    if (!student) throw new Error('Student record not found.');
+
+    const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
+    const studentEnrs = enrollments.filter((e) => e.student_id === studentId);
+    const enrIds = studentEnrs.map((e) => e.id);
+
+    const attendances = getStorage<any[]>('attendance', []);
+    const attendanceCount = attendances.filter((a) => enrIds.includes(a.enrollment_id)).length;
+
+    const invoices = getStorage<any[]>('fee_invoices', []);
+    const studentInvoices = invoices.filter((i) => enrIds.includes(i.enrollment_id));
+    const invoiceCount = studentInvoices.length;
+    const invIds = studentInvoices.map((i) => i.id);
+
+    const payments = getStorage<any[]>('fee_payments', []);
+    const paymentCount = payments.filter((p) => invIds.includes(p.invoice_id)).length;
+
+    const marks = getStorage<any[]>('marks', []);
+    const marksCount = marks.filter((m) => enrIds.includes(m.enrollment_id)).length;
+
+    const hasDeps = attendanceCount > 0 || invoiceCount > 0 || paymentCount > 0 || marksCount > 0;
+    return {
+      student_id: studentId,
+      student_name: student.full_name,
+      admission_no: student.admission_no,
+      has_dependencies: hasDeps,
+      eligible_for_permanent_deletion: !hasDeps,
+      recommendation: hasDeps ? 'archive_recommended' : 'permanent_deletion',
+      dependencies: {
+        enrollments: enrIds.length,
+        attendance_records: attendanceCount,
+        fee_invoices: invoiceCount,
+        fee_payments: paymentCount,
+        exam_marks: marksCount,
+      },
+      explanation: hasDeps
+        ? `Student has ${attendanceCount} attendance records, ${invoiceCount} fee invoices, ${paymentCount} fee payments, and ${marksCount} exam marks. To preserve financial and academic history, please use "Archive Student" instead of permanent deletion.`
+        : 'Student has no academic or financial history. Record is eligible for permanent removal.',
+    };
+  },
+
+  safeDeleteStudent: async (
+    studentId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to delete student records.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_safe_delete_student', {
+          p_student_id: studentId,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          return {
+            success: true,
+            message: rpcData.message || 'Student record deleted successfully.',
+          };
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_safe_delete_student')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('admin_safe_delete_student')) {
+          throw err;
+        }
+      }
+
+      const eligibility = await studentApi.checkDeletionEligibility(studentId, actor);
+      if (eligibility.has_dependencies) {
+        throw new Error(`Permanent Deletion Blocked: ${eligibility.explanation}`);
+      }
+
+      const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
+      const profileId = student?.profile_id;
+
+      await supabase.from('enrollments').delete().eq('student_id', studentId);
+      const { error: delErr } = await supabase.from('students').delete().eq('id', studentId);
+      if (delErr) throw delErr;
+
+      if (profileId) {
+        try {
+          await supabase.from('profiles').delete().eq('id', profileId).eq('role', 'student');
+        } catch {}
+      }
+
+      await logAudit(actor || {}, 'STUDENT_RECORD_PERMANENTLY_DELETED', 'students', studentId, {
+        student_name: student?.full_name,
+        admission_no: student?.admission_no,
+      });
+
+      return {
+        success: true,
+        message: `Student "${student?.full_name}" (Admission No: ${student?.admission_no}) has been permanently deleted.`,
+      };
+    }
+
+    const eligibility = await studentApi.checkDeletionEligibility(studentId, actor);
+    if (eligibility.has_dependencies) {
+      throw new Error(`Permanent Deletion Blocked: ${eligibility.explanation}`);
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const sIdx = students.findIndex((s) => s.id === studentId);
+    if (sIdx === -1) throw new Error('Student record not found.');
+    const student = students[sIdx];
+
+    const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
+    setStorage('enrollments', enrollments.filter((e) => e.student_id !== studentId));
+
+    if (student.profile_id) {
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+      setStorage('profiles', profiles.filter((p) => p.id !== student.profile_id));
+    }
+
+    setStorage('students', students.filter((s) => s.id !== studentId));
+
+    await logAudit(actor || {}, 'STUDENT_RECORD_PERMANENTLY_DELETED', 'students', studentId, {
+      student_name: student.full_name,
+      admission_no: student.admission_no,
+    });
+
+    return {
+      success: true,
+      message: `Student "${student.full_name}" (Admission No: ${student.admission_no}) has been permanently deleted.`,
     };
   },
 };

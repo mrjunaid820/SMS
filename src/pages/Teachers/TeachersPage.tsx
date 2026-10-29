@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Teacher, TeacherAssignment, ClassLevel, Section, Subject, Profile } from '@/types/database';
 import { teacherApi, academicStructureApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
@@ -8,6 +8,7 @@ import { Button } from '@/components/common/Button';
 import { Modal } from '@/components/common/Modal';
 import { Input } from '@/components/common/Input';
 import { Select } from '@/components/common/Select';
+import { ConfirmationDialog } from '@/components/common/ConfirmationDialog';
 import { Badge } from '@/components/common/Badge';
 import { formatDate } from '@/lib/utils';
 import {
@@ -28,6 +29,8 @@ import {
   Sparkles,
   RefreshCw,
   AlertCircle,
+  AlertTriangle,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const TeachersPage: React.FC = () => {
@@ -92,9 +95,24 @@ export const TeachersPage: React.FC = () => {
   const [loginSuccess, setLoginSuccess] = useState<string | null>(null);
   const [copiedCredentials, setCopiedCredentials] = useState(false);
 
-  // State for Bulk Provisioning
-  const [isBulkProvisionModalOpen, setIsBulkProvisionModalOpen] = useState(false);
+  // Single Teacher Portal Toggle Confirmation State
+  const [teacherPortalToggleConfirm, setTeacherPortalToggleConfirm] = useState<{
+    isOpen: boolean;
+    teacher: Teacher | null;
+    active: boolean;
+  }>({
+    isOpen: false,
+    teacher: null,
+    active: false,
+  });
+
+  // State for Multi-selection & Bulk Operations
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState<Set<string>>(new Set());
+  const [bulkActionType, setBulkActionType] = useState<'activate' | 'deactivate' | 'reactivate'>('activate');
+  const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
+  const [bulkDefaultPassword, setBulkDefaultPassword] = useState('Teacher123!');
+  const [isBulkReportOpen, setIsBulkReportOpen] = useState(false);
   const [bulkReport, setBulkReport] = useState<{
     total: number;
     successCount: number;
@@ -230,27 +248,133 @@ export const TeachersPage: React.FC = () => {
     }
   };
 
-  const handleBulkProvisionAllTeachers = async () => {
-    const unprovisioned = teachers.filter((t) => !t.profile_id && t.is_active);
-    if (unprovisioned.length === 0) {
-      alert('All eligible active teachers already have provisioned portal accounts.');
-      return;
-    }
+  // Groups of teachers in current view
+  const unprovisionedTeachers = useMemo(() => {
+    return teachers.filter((t) => t.portal_status === 'not_provisioned' || !t.profile_id);
+  }, [teachers]);
 
+  const activePortalTeachers = useMemo(() => {
+    return teachers.filter((t) => t.portal_status === 'active' || (t.profile_id && t.is_active && t.portal_status !== 'inactive'));
+  }, [teachers]);
+
+  const inactivePortalTeachers = useMemo(() => {
+    return teachers.filter((t) => t.portal_status === 'inactive' || (t.profile_id && !t.is_active));
+  }, [teachers]);
+
+  const eligibleBulkTeachers = useMemo(() => {
+    const selected = teachers.filter((t) => selectedTeacherIds.has(t.id));
+    if (bulkActionType === 'activate') {
+      return selected.filter((t) => t.portal_status === 'not_provisioned' || !t.profile_id);
+    }
+    if (bulkActionType === 'deactivate') {
+      return selected.filter((t) => t.portal_status === 'active' || (t.profile_id && t.is_active && t.portal_status !== 'inactive'));
+    }
+    if (bulkActionType === 'reactivate') {
+      return selected.filter((t) => t.portal_status === 'inactive' || (t.profile_id && !t.is_active));
+    }
+    return selected;
+  }, [teachers, selectedTeacherIds, bulkActionType]);
+
+  const selectedUnprovisionedCount = useMemo(() => {
+    return teachers.filter((t) => selectedTeacherIds.has(t.id) && (t.portal_status === 'not_provisioned' || !t.profile_id)).length;
+  }, [teachers, selectedTeacherIds]);
+
+  const selectedActiveCount = useMemo(() => {
+    return teachers.filter((t) => selectedTeacherIds.has(t.id) && (t.portal_status === 'active' || (t.profile_id && t.is_active && t.portal_status !== 'inactive'))).length;
+  }, [teachers, selectedTeacherIds]);
+
+  const selectedInactiveCount = useMemo(() => {
+    return teachers.filter((t) => selectedTeacherIds.has(t.id) && (t.portal_status === 'inactive' || (t.profile_id && !t.is_active))).length;
+  }, [teachers, selectedTeacherIds]);
+
+  const handleToggleSelectTeacher = (id: string) => {
+    setSelectedTeacherIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllTeachers = () => {
+    setSelectedTeacherIds(new Set(teachers.map((t) => t.id)));
+  };
+
+  const handleSelectAllUnprovisionedTeachers = () => {
+    setSelectedTeacherIds(new Set(unprovisionedTeachers.map((t) => t.id)));
+  };
+
+  const handleSelectAllActiveTeachers = () => {
+    setSelectedTeacherIds(new Set(activePortalTeachers.map((t) => t.id)));
+  };
+
+  const handleSelectAllInactiveTeachers = () => {
+    setSelectedTeacherIds(new Set(inactivePortalTeachers.map((t) => t.id)));
+  };
+
+  const handleClearTeacherSelection = () => {
+    setSelectedTeacherIds(new Set());
+  };
+
+  const handleStartBulkTeacherAction = (action: 'activate' | 'deactivate' | 'reactivate') => {
+    setBulkActionType(action);
+    setBulkDefaultPassword('Teacher123!');
+    setIsBulkConfirmOpen(true);
+  };
+
+  const handleExecuteBulkTeacherAction = async () => {
+    setIsBulkConfirmOpen(false);
     setIsBulkSubmitting(true);
-    setBulkReport(null);
     try {
-      const report = await teacherApi.bulkProvisionTeacherAccounts(
-        unprovisioned.map((t) => t.id),
-        'Teacher123!',
-        { id: user?.id, name: user?.full_name, role: user?.role }
-      );
-      setBulkReport(report);
+      const idsArray = eligibleBulkTeachers.map((t) => t.id);
+      if (bulkActionType === 'activate') {
+        const report = await teacherApi.bulkProvisionTeacherAccounts(
+          idsArray,
+          bulkDefaultPassword,
+          { id: user?.id, name: user?.full_name, role: user?.role }
+        );
+        setBulkReport(report);
+      } else {
+        const isReactivating = bulkActionType === 'reactivate';
+        const report = await teacherApi.bulkSetPortalActive(
+          idsArray,
+          isReactivating,
+          { id: user?.id, name: user?.full_name, role: user?.role }
+        );
+        setBulkReport(report);
+      }
+      setIsBulkReportOpen(true);
+      setSelectedTeacherIds(new Set());
       await loadData();
     } catch (err: any) {
-      alert(`Bulk provisioning error: ${err.message}`);
+      alert(`Bulk operation error: ${err.message}`);
     } finally {
       setIsBulkSubmitting(false);
+    }
+  };
+
+  // Single Teacher Portal Toggle Handlers
+  const handleToggleTeacherPortalDirect = (teacher: Teacher, active: boolean) => {
+    setTeacherPortalToggleConfirm({
+      isOpen: true,
+      teacher,
+      active,
+    });
+  };
+
+  const handleExecuteTeacherPortalToggle = async () => {
+    if (!teacherPortalToggleConfirm.teacher) return;
+    try {
+      const res = await teacherApi.setPortalActive(
+        teacherPortalToggleConfirm.teacher.id,
+        teacherPortalToggleConfirm.active,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setTeacherPortalToggleConfirm({ isOpen: false, teacher: null, active: false });
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      alert(`Failed to update teacher portal status: ${err.message}`);
     }
   };
 
@@ -420,6 +544,39 @@ export const TeachersPage: React.FC = () => {
   };
 
   const columns: Column<Teacher>[] = [
+    ...(isAdmin
+      ? [
+          {
+            key: 'selection',
+            header: (
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                  checked={teachers.length > 0 && teachers.every((t) => selectedTeacherIds.has(t.id))}
+                  onChange={(e) => {
+                    if (e.target.checked) handleSelectAllTeachers();
+                    else handleClearTeacherSelection();
+                  }}
+                  title="Select or deselect all teachers"
+                />
+              </div>
+            ),
+            className: 'w-10 text-center px-2',
+            render: (row: Teacher) => (
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  checked={selectedTeacherIds.has(row.id)}
+                  onChange={() => handleToggleSelectTeacher(row.id)}
+                  className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                  title={`Select ${row.full_name}`}
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
     {
       key: 'employee_id',
       header: 'Employee ID',
@@ -481,18 +638,31 @@ export const TeachersPage: React.FC = () => {
     {
       key: 'portal_status',
       header: 'Portal Access',
-      render: (row) =>
-        row.profile_id ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-            <UserCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-            Active
-          </span>
-        ) : (
+      render: (row) => {
+        const status = row.portal_status || (!row.profile_id ? 'not_provisioned' : row.is_active ? 'active' : 'inactive');
+        if (status === 'active') {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              <UserCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              Active
+            </span>
+          );
+        }
+        if (status === 'inactive') {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+              <UserX className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+              Inactive
+            </span>
+          );
+        }
+        return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-            <UserX className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+            <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
             Not Provisioned
           </span>
-        ),
+        );
+      },
     },
     {
       key: 'status',
@@ -507,55 +677,68 @@ export const TeachersPage: React.FC = () => {
       key: 'actions',
       header: 'Actions',
       className: 'text-right',
-      render: (row) => (
-        <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => {
-              setSelectedTeacher(row);
-              setIsViewModalOpen(true);
-            }}
-            className="p-1.5 text-slate-500 hover:text-navy-900 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-            title="View Teaching Allocations"
-          >
-            <BookOpen className="w-4 h-4" />
-          </button>
-          {isAdmin && (
+      render: (row) => {
+        const status = row.portal_status || (!row.profile_id ? 'not_provisioned' : row.is_active ? 'active' : 'inactive');
+        return (
+          <div className="flex items-center justify-end gap-1">
             <button
-              onClick={() => handleOpenEdit(row)}
-              className="p-1.5 text-slate-500 hover:text-navy-900 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-              title="Edit Teacher Profile"
+              onClick={() => {
+                setSelectedTeacher(row);
+                setIsViewModalOpen(true);
+              }}
+              className="p-1.5 text-slate-500 hover:text-navy-900 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="View Teaching Allocations"
             >
-              <Pencil className="w-4 h-4" />
+              <BookOpen className="w-4 h-4" />
             </button>
-          )}
-          {isAdmin && (
-            <button
-              onClick={() => handleOpenManageLogin(row)}
-              className={`p-1.5 rounded-md transition-colors ${
-                row.profile_id
-                  ? 'text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 font-medium'
-              }`}
-              title={row.profile_id ? 'Manage Login & Password' : 'Provision Portal Account'}
-            >
-              {row.profile_id ? <KeyRound className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-            </button>
-          )}
-          {isAdmin && (
-            <button
-              onClick={() => handleToggleStatus(row)}
-              className={`p-1.5 rounded-md ${
-                row.is_active
-                  ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                  : 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
-              }`}
-              title={row.is_active ? 'Deactivate Teacher Account' : 'Activate Teacher Account'}
-            >
-              {row.is_active ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-            </button>
-          )}
-        </div>
-      ),
+            {isAdmin && (
+              <button
+                onClick={() => handleOpenEdit(row)}
+                className="p-1.5 text-slate-500 hover:text-navy-900 dark:hover:text-white rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                title="Edit Teacher Profile"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                {status === 'not_provisioned' ? (
+                  <button
+                    onClick={() => handleOpenManageLogin(row)}
+                    className="p-1.5 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-md"
+                    title="Activate Teacher Portal Account"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                  </button>
+                ) : status === 'inactive' ? (
+                  <button
+                    onClick={() => handleToggleTeacherPortalDirect(row, true)}
+                    className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-md"
+                    title="Reactivate Teacher Portal"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleToggleTeacherPortalDirect(row, false)}
+                    className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md"
+                    title="Deactivate Teacher Portal"
+                  >
+                    <UserX className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleOpenManageLogin(row)}
+                  className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md"
+                  title="Manage Login & Password"
+                >
+                  <KeyRound className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -575,20 +758,6 @@ export const TeachersPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdmin && unprovisionedCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              leftIcon={<Sparkles className="w-4 h-4 text-amber-500" />}
-              onClick={() => {
-                setBulkReport(null);
-                setIsBulkProvisionModalOpen(true);
-              }}
-            >
-              Bulk Provision Portals ({unprovisionedCount})
-            </Button>
-          )}
-
           {isAdmin && (
             <Button size="sm" leftIcon={<UserPlus className="w-4 h-4" />} onClick={handleOpenAdd}>
               Add New Teacher
@@ -596,6 +765,104 @@ export const TeachersPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Bulk Selection Action Toolbar for Teachers */}
+      {isAdmin && (
+        <div className="p-3.5 bg-gradient-to-r from-brand-50 to-indigo-50 dark:from-slate-800/90 dark:to-slate-900 border border-brand-200 dark:border-brand-900/50 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-brand-600 text-white rounded-lg shadow-xs">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                Teacher Faculty Portal Controls
+                {selectedTeacherIds.size > 0 ? (
+                  <Badge variant="info">
+                    {selectedTeacherIds.size} teacher{selectedTeacherIds.size > 1 ? 's' : ''} selected
+                  </Badge>
+                ) : (
+                  <Badge variant="default">
+                    {unprovisionedTeachers.length} unprovisioned
+                  </Badge>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                Batch activate, deactivate, or reactivate faculty portal accounts
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={handleSelectAllUnprovisionedTeachers}
+                disabled={unprovisionedTeachers.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Unprovisioned ({unprovisionedTeachers.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllActiveTeachers}
+                disabled={activePortalTeachers.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Active ({activePortalTeachers.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllInactiveTeachers}
+                disabled={inactivePortalTeachers.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Inactive ({inactivePortalTeachers.length})
+              </button>
+            </div>
+
+            {selectedTeacherIds.size > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearTeacherSelection}
+                className="text-slate-600 dark:text-slate-400"
+              >
+                Clear
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={selectedUnprovisionedCount === 0}
+              onClick={() => handleStartBulkTeacherAction('activate')}
+              leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+            >
+              Bulk Activate ({selectedUnprovisionedCount})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={selectedActiveCount === 0}
+              onClick={() => handleStartBulkTeacherAction('deactivate')}
+              leftIcon={<UserX className="w-3.5 h-3.5" />}
+            >
+              Bulk Deactivate ({selectedActiveCount})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedInactiveCount === 0}
+              onClick={() => handleStartBulkTeacherAction('reactivate')}
+              leftIcon={<UserCheck className="w-3.5 h-3.5" />}
+            >
+              Bulk Reactivate ({selectedInactiveCount})
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Teachers DataTable */}
       <DataTable
@@ -1311,72 +1578,151 @@ export const TeachersPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* 5. Modal: Bulk Teacher Portal Provisioning */}
+      {/* 5. Confirmation Dialog: Single Teacher Portal Toggle */}
+      <ConfirmationDialog
+        isOpen={teacherPortalToggleConfirm.isOpen}
+        onClose={() => setTeacherPortalToggleConfirm({ isOpen: false, teacher: null, active: false })}
+        onConfirm={handleExecuteTeacherPortalToggle}
+        title={teacherPortalToggleConfirm.active ? 'Reactivate Teacher Portal' : 'Deactivate Teacher Portal'}
+        message={
+          teacherPortalToggleConfirm.active
+            ? `Are you sure you want to reactivate portal access for ${teacherPortalToggleConfirm.teacher?.full_name} (${teacherPortalToggleConfirm.teacher?.employee_id})? The teacher will be able to log in again.`
+            : `Are you sure you want to deactivate portal access for ${teacherPortalToggleConfirm.teacher?.full_name} (${teacherPortalToggleConfirm.teacher?.employee_id})? The teacher will be prevented from logging in immediately, but all teaching allocations, attendance, and exam records will be preserved.`
+        }
+        confirmText={teacherPortalToggleConfirm.active ? 'Reactivate Portal' : 'Deactivate Portal'}
+        variant={teacherPortalToggleConfirm.active ? 'primary' : 'danger'}
+      />
+
+      {/* 6. Modal: Bulk Teacher Portal Action Confirmation */}
       <Modal
-        isOpen={isBulkProvisionModalOpen}
-        onClose={() => setIsBulkProvisionModalOpen(false)}
-        title="Bulk Provision Teacher Portals"
-        description="Batch activates portal accounts for all unlinked faculty members"
+        isOpen={isBulkConfirmOpen}
+        onClose={() => setIsBulkConfirmOpen(false)}
+        title={
+          bulkActionType === 'activate'
+            ? `Bulk Teacher Portal Activation (${eligibleBulkTeachers.length} Teachers)`
+            : bulkActionType === 'deactivate'
+            ? `Bulk Teacher Portal Deactivation (${eligibleBulkTeachers.length} Teachers)`
+            : `Bulk Teacher Portal Reactivation (${eligibleBulkTeachers.length} Teachers)`
+        }
         size="md"
       >
         <div className="space-y-4">
-          {!bulkReport ? (
-            <>
-              <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 text-xs space-y-2">
-                <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200 text-sm">
-                  <Sparkles className="w-4 h-4 text-amber-600" />
-                  <span>{unprovisionedCount} Unlinked Teacher Accounts Detected</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-300">
-                  This operation will provision Supabase Auth accounts for all active faculty members using their institutional email addresses and the school's standard default teacher password:
-                </p>
-                <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-amber-200 dark:border-amber-800 font-mono text-xs flex justify-between items-center">
-                  <span>Default Password: <b>Teacher123!</b></span>
-                  <span className="text-[10px] text-slate-400 font-sans">Administrators can customize anytime</span>
-                </div>
-              </div>
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-blue-900 dark:text-blue-200">
+              {bulkActionType === 'activate' && (
+                <span>
+                  <span className="font-semibold">Batch Portal Provisioning:</span> Each selected unprovisioned faculty member will be provisioned with a portal login account using their institutional email address.
+                </span>
+              )}
+              {bulkActionType === 'deactivate' && (
+                <span>
+                  <span className="font-semibold">Batch Portal Deactivation:</span> Each selected teacher will have their portal access revoked. Subject allocations and classroom attendance records will not be altered.
+                </span>
+              )}
+              {bulkActionType === 'reactivate' && (
+                <span>
+                  <span className="font-semibold">Batch Portal Reactivation:</span> Each selected teacher will regain login access to the teacher portal.
+                </span>
+              )}
+            </div>
+          </div>
 
-              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                {teachers
-                  .filter((t) => !t.profile_id && t.is_active)
-                  .map((t) => (
-                    <div
-                      key={t.id}
-                      className="p-2 bg-slate-50 dark:bg-slate-800 rounded flex items-center justify-between text-xs"
-                    >
-                      <div>
-                        <div className="font-semibold text-slate-900 dark:text-slate-100">{t.full_name}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">{t.email}</div>
-                      </div>
-                      <Badge variant="warning">Pending</Badge>
+          {bulkActionType === 'activate' && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Default Teacher Password
+              </label>
+              <Input
+                type="text"
+                value={bulkDefaultPassword}
+                onChange={(e) => setBulkDefaultPassword(e.target.value)}
+                placeholder="e.g. Teacher123!"
+                required
+              />
+              <p className="text-[11px] text-slate-500">
+                This initial password will be assigned to all newly provisioned teacher accounts.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2">
+              Eligible Faculty Preview ({eligibleBulkTeachers.length})
+            </div>
+            <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+              {eligibleBulkTeachers.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500">
+                  No selected teachers match this operation criteria.
+                </div>
+              ) : (
+                eligibleBulkTeachers.map((t) => (
+                  <div key={t.id} className="p-2.5 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">{t.full_name}</span>
+                      <span className="ml-2 font-mono text-[11px] text-slate-500">({t.employee_id})</span>
                     </div>
-                  ))}
-              </div>
+                    <Badge
+                      variant={
+                        t.portal_status === 'active'
+                          ? 'success'
+                          : t.portal_status === 'inactive'
+                          ? 'danger'
+                          : 'default'
+                      }
+                    >
+                      {t.portal_status ? t.portal_status.toUpperCase() : 'NOT PROVISIONED'}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <Button variant="outline" onClick={() => setIsBulkProvisionModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleBulkProvisionAllTeachers}
-                  isLoading={isBulkSubmitting}
-                  leftIcon={<Sparkles className="w-4 h-4" />}
-                >
-                  Provision All ({unprovisionedCount})
-                </Button>
-              </div>
-            </>
-          ) : (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setIsBulkConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={bulkActionType === 'deactivate' ? 'danger' : 'primary'}
+              disabled={eligibleBulkTeachers.length === 0}
+              isLoading={isBulkSubmitting}
+              onClick={handleExecuteBulkTeacherAction}
+              leftIcon={
+                bulkActionType === 'activate' ? (
+                  <UserPlus className="w-4 h-4" />
+                ) : bulkActionType === 'deactivate' ? (
+                  <UserX className="w-4 h-4" />
+                ) : (
+                  <UserCheck className="w-4 h-4" />
+                )
+              }
+            >
+              Confirm & {bulkActionType === 'activate' ? 'Activate' : bulkActionType === 'deactivate' ? 'Deactivate' : 'Reactivate'} {eligibleBulkTeachers.length} Portals
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 7. Modal: Bulk Teacher Action Report */}
+      <Modal
+        isOpen={isBulkReportOpen}
+        onClose={() => setIsBulkReportOpen(false)}
+        title="Teacher Bulk Operation Report"
+        size="md"
+      >
+        <div className="space-y-4">
+          {bulkReport && (
             <>
               <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs space-y-3">
                 <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-200 text-sm">
                   <Check className="w-5 h-5 text-emerald-600" />
-                  <span>Bulk Provisioning Completed</span>
+                  <span>Bulk Operation Completed</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="p-2 bg-white dark:bg-slate-900 rounded border border-emerald-200 dark:border-emerald-800">
                     <div className="text-lg font-bold text-emerald-600">{bulkReport.successCount}</div>
-                    <div className="text-[10px] text-slate-500">Provisioned</div>
+                    <div className="text-[10px] text-slate-500">Processed</div>
                   </div>
                   <div className="p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800">
                     <div className="text-lg font-bold text-slate-600">{bulkReport.skippedCount}</div>
@@ -1409,7 +1755,7 @@ export const TeachersPage: React.FC = () => {
               </div>
 
               <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
-                <Button onClick={() => setIsBulkProvisionModalOpen(false)}>
+                <Button onClick={() => setIsBulkReportOpen(false)}>
                   Close
                 </Button>
               </div>

@@ -32,6 +32,11 @@ import {
   Users,
   RefreshCw,
   XCircle,
+  Trash2,
+  UserCheck,
+  UserX,
+  AlertCircle,
+  Check,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
@@ -68,8 +73,43 @@ export const StudentsPage: React.FC = () => {
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalSuccess, setPortalSuccess] = useState<string | null>(null);
 
-  // Bulk Student Portal Activation State
+  // Single Portal Toggle Confirm State
+  const [portalToggleConfirm, setPortalToggleConfirm] = useState<{
+    isOpen: boolean;
+    student: Student | null;
+    active: boolean;
+  }>({
+    isOpen: false,
+    student: null,
+    active: false,
+  });
+
+  // Safe Deletion Modal State
+  const [isSafeDeleteModalOpen, setIsSafeDeleteModalOpen] = useState(false);
+  const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
+  const [deletionEligibility, setDeletionEligibility] = useState<{
+    student_id: string;
+    student_name: string;
+    admission_no: string;
+    has_dependencies: boolean;
+    eligible_for_permanent_deletion: boolean;
+    recommendation: 'archive_recommended' | 'permanent_deletion';
+    dependencies: {
+      enrollments: number;
+      attendance_records: number;
+      fee_invoices: number;
+      fee_payments: number;
+      exam_marks: number;
+    };
+    explanation: string;
+  } | null>(null);
+  const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Bulk Student Portal State
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [bulkActionType, setBulkActionType] = useState<'activate' | 'deactivate' | 'reactivate'>('activate');
   const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [bulkPassword, setBulkPassword] = useState('Student123!');
@@ -516,10 +556,49 @@ export const StudentsPage: React.FC = () => {
     });
   }, [students, enrollments, selectedClassId, selectedSectionId]);
 
-  // Unprovisioned active students in current filtered view
+  // Groups of students in current filtered view
   const unprovisionedStudents = useMemo(() => {
-    return displayedStudents.filter((s) => !s.profile_id && !s.email && s.is_active);
+    return displayedStudents.filter(
+      (s) => (s.portal_status === 'not_provisioned' || (!s.profile_id && !s.email)) && s.is_active
+    );
   }, [displayedStudents]);
+
+  const activePortalStudents = useMemo(() => {
+    return displayedStudents.filter((s) => s.portal_status === 'active');
+  }, [displayedStudents]);
+
+  const inactivePortalStudents = useMemo(() => {
+    return displayedStudents.filter((s) => s.portal_status === 'inactive');
+  }, [displayedStudents]);
+
+  // Students eligible for currently selected bulk operation
+  const eligibleBulkStudents = useMemo(() => {
+    const selected = displayedStudents.filter((s) => selectedStudentIds.has(s.id));
+    if (bulkActionType === 'activate') {
+      return selected.filter((s) => s.portal_status === 'not_provisioned' || (!s.profile_id && !s.email));
+    }
+    if (bulkActionType === 'deactivate') {
+      return selected.filter((s) => s.portal_status === 'active');
+    }
+    if (bulkActionType === 'reactivate') {
+      return selected.filter((s) => s.portal_status === 'inactive');
+    }
+    return selected;
+  }, [displayedStudents, selectedStudentIds, bulkActionType]);
+
+  const selectedUnprovisionedCount = useMemo(() => {
+    return displayedStudents.filter(
+      (s) => selectedStudentIds.has(s.id) && (s.portal_status === 'not_provisioned' || (!s.profile_id && !s.email))
+    ).length;
+  }, [displayedStudents, selectedStudentIds]);
+
+  const selectedActiveCount = useMemo(() => {
+    return displayedStudents.filter((s) => selectedStudentIds.has(s.id) && s.portal_status === 'active').length;
+  }, [displayedStudents, selectedStudentIds]);
+
+  const selectedInactiveCount = useMemo(() => {
+    return displayedStudents.filter((s) => selectedStudentIds.has(s.id) && s.portal_status === 'inactive').length;
+  }, [displayedStudents, selectedStudentIds]);
 
   const handleToggleSelectStudent = (studentId: string) => {
     setSelectedStudentIds((prev) => {
@@ -533,44 +612,78 @@ export const StudentsPage: React.FC = () => {
     });
   };
 
+  const handleSelectAllDisplayed = () => {
+    setSelectedStudentIds(new Set(displayedStudents.map((s) => s.id)));
+  };
+
   const handleSelectAllUnprovisioned = () => {
-    const unprovIds = unprovisionedStudents.map((s) => s.id);
-    setSelectedStudentIds(new Set(unprovIds));
+    setSelectedStudentIds(new Set(unprovisionedStudents.map((s) => s.id)));
+  };
+
+  const handleSelectAllActive = () => {
+    setSelectedStudentIds(new Set(activePortalStudents.map((s) => s.id)));
+  };
+
+  const handleSelectAllInactive = () => {
+    setSelectedStudentIds(new Set(inactivePortalStudents.map((s) => s.id)));
   };
 
   const handleClearSelection = () => {
     setSelectedStudentIds(new Set());
   };
 
-  const handleStartBulkActivation = () => {
-    if (selectedStudentIds.size === 0) return;
+  const handleStartBulkAction = (action: 'activate' | 'deactivate' | 'reactivate') => {
+    setBulkActionType(action);
     setBulkPassword('Student123!');
     setIsBulkConfirmOpen(true);
   };
 
-  const handleExecuteBulkActivation = async () => {
+  const handleExecuteBulkAction = async () => {
     setIsBulkConfirmOpen(false);
     setIsBulkProcessing(true);
     setBulkProgress({
       current: 0,
-      total: selectedStudentIds.size,
-      currentStudentName: 'Initiating provisioning...',
+      total: eligibleBulkStudents.length,
+      currentStudentName: `Executing bulk ${bulkActionType}...`,
     });
 
     try {
-      const idsArray = Array.from(selectedStudentIds);
-      const res = await studentApi.bulkProvisionStudentAccounts(
-        idsArray,
-        bulkPassword,
-        { id: user?.id, name: user?.full_name, role: user?.role }
-      );
+      const idsArray = eligibleBulkStudents.map((s) => s.id);
+      if (bulkActionType === 'activate') {
+        const res = await studentApi.bulkProvisionStudentAccounts(
+          idsArray,
+          bulkPassword,
+          { id: user?.id, name: user?.full_name, role: user?.role }
+        );
+        setBulkResults(res);
+      } else {
+        const isReactivating = bulkActionType === 'reactivate';
+        const res = await studentApi.bulkSetPortalActive(
+          idsArray,
+          isReactivating,
+          { id: user?.id, name: user?.full_name, role: user?.role }
+        );
+        setBulkResults({
+          total_requested: res.total_requested,
+          success_count: res.success_count,
+          skipped_count: res.skipped_count,
+          failed_count: res.failed_count,
+          results: res.results.map((r: any) => ({
+            student_id: r.student_id,
+            student_name: r.full_name || 'Student',
+            admission_no: '—',
+            email: null,
+            status: r.status,
+            message: r.message || r.error || (isReactivating ? 'Portal reactivated successfully.' : 'Portal deactivated successfully.'),
+          })),
+        });
+      }
 
-      setBulkResults(res);
       setBulkResultsModalOpen(true);
       setSelectedStudentIds(new Set());
       await loadData();
     } catch (err: any) {
-      alert(`Bulk provisioning error: ${err.message}`);
+      alert(`Bulk operation error: ${err.message}`);
     } finally {
       setIsBulkProcessing(false);
     }
@@ -586,6 +699,73 @@ export const StudentsPage: React.FC = () => {
     setIsBulkConfirmOpen(true);
   };
 
+  // Single Portal Toggle Handlers
+  const handleTogglePortalStatusDirect = (student: Student, active: boolean) => {
+    setPortalToggleConfirm({
+      isOpen: true,
+      student,
+      active,
+    });
+  };
+
+  const handleExecutePortalToggle = async () => {
+    if (!portalToggleConfirm.student) return;
+    try {
+      const res = await studentApi.setPortalActive(
+        portalToggleConfirm.student.id,
+        portalToggleConfirm.active,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setPortalToggleConfirm({ isOpen: false, student: null, active: false });
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      alert(`Failed to update portal status: ${err.message}`);
+    }
+  };
+
+  // Safe Deletion Handlers
+  const handleOpenSafeDelete = async (student: Student) => {
+    setDeletingStudent(student);
+    setDeletionEligibility(null);
+    setDeleteError(null);
+    setIsSafeDeleteModalOpen(true);
+    setIsCheckingEligibility(true);
+    try {
+      const eligibility = await studentApi.checkDeletionEligibility(student.id, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setDeletionEligibility(eligibility);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to inspect student dependencies.');
+    } finally {
+      setIsCheckingEligibility(false);
+    }
+  };
+
+  const handleExecuteSafeDelete = async () => {
+    if (!deletingStudent) return;
+    setIsDeletingStudent(true);
+    setDeleteError(null);
+    try {
+      const res = await studentApi.safeDeleteStudent(deletingStudent.id, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setIsSafeDeleteModalOpen(false);
+      setDeletingStudent(null);
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete student.');
+    } finally {
+      setIsDeletingStudent(false);
+    }
+  };
+
   // Data Table Columns Definition
   const columns: Column<Student>[] = [
     ...(isAdmin
@@ -598,33 +778,22 @@ export const StudentsPage: React.FC = () => {
                   type="checkbox"
                   className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
                   checked={
-                    unprovisionedStudents.length > 0 &&
-                    unprovisionedStudents.every((s) => selectedStudentIds.has(s.id))
+                    displayedStudents.length > 0 &&
+                    displayedStudents.every((s) => selectedStudentIds.has(s.id))
                   }
                   onChange={(e) => {
                     if (e.target.checked) {
-                      handleSelectAllUnprovisioned();
+                      handleSelectAllDisplayed();
                     } else {
                       handleClearSelection();
                     }
                   }}
-                  title="Select or deselect all unprovisioned students"
+                  title="Select or deselect all visible students"
                 />
               </div>
             ),
             className: 'w-10 text-center px-2',
             render: (row: Student) => {
-              const isProvisioned = Boolean(row.profile_id || row.email);
-              if (isProvisioned || !row.is_active) {
-                return (
-                  <div
-                    className="flex items-center justify-center"
-                    title={isProvisioned ? 'Portal account already active' : 'Student is inactive'}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700 block opacity-50" />
-                  </div>
-                );
-              }
               const isSelected = selectedStudentIds.has(row.id);
               return (
                 <div className="flex items-center justify-center">
@@ -633,7 +802,7 @@ export const StudentsPage: React.FC = () => {
                     checked={isSelected}
                     onChange={() => handleToggleSelectStudent(row.id)}
                     className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
-                    title={`Select ${row.full_name} for portal activation`}
+                    title={`Select ${row.full_name}`}
                   />
                 </div>
               );
@@ -697,11 +866,28 @@ export const StudentsPage: React.FC = () => {
       key: 'portal_access',
       header: 'Portal Access',
       render: (row) => {
-        const hasPortal = Boolean(row.profile_id || row.email);
+        const status = row.portal_status || (!row.profile_id && !row.email ? 'not_provisioned' : 'active');
+        if (status === 'active') {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              Portal Active
+            </span>
+          );
+        }
+        if (status === 'inactive') {
+          return (
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+              <UserX className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              Portal Inactive
+            </span>
+          );
+        }
         return (
-          <Badge variant={hasPortal ? 'info' : 'default'}>
-            {hasPortal ? 'Portal Active' : 'No Account'}
-          </Badge>
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            Not Provisioned
+          </span>
         );
       },
     },
@@ -711,6 +897,7 @@ export const StudentsPage: React.FC = () => {
       className: 'text-right',
       render: (row) => {
         const enr = enrollments.find((e) => e.student_id === row.id);
+        const status = row.portal_status || (!row.profile_id && !row.email ? 'not_provisioned' : 'active');
         return (
           <div className="flex items-center justify-end gap-1">
             <button
@@ -733,13 +920,40 @@ export const StudentsPage: React.FC = () => {
               </button>
             )}
             {isAdmin && (
-              <button
-                onClick={() => handleOpenPortalModal(row)}
-                className="p-1.5 text-brand-600 hover:text-brand-800 dark:hover:text-brand-300 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/40"
-                title="Manage Student Portal Account"
-              >
-                <KeyRound className="w-4 h-4" />
-              </button>
+              <>
+                {status === 'not_provisioned' ? (
+                  <button
+                    onClick={() => handleOpenPortalModal(row)}
+                    className="p-1.5 text-amber-600 hover:text-amber-800 dark:hover:text-amber-300 rounded-md hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                    title="Activate Portal Account"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                  </button>
+                ) : status === 'inactive' ? (
+                  <button
+                    onClick={() => handleTogglePortalStatusDirect(row, true)}
+                    className="p-1.5 text-emerald-600 hover:text-emerald-800 dark:hover:text-emerald-300 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                    title="Reactivate Student Portal"
+                  >
+                    <UserCheck className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleTogglePortalStatusDirect(row, false)}
+                    className="p-1.5 text-rose-600 hover:text-rose-800 dark:hover:text-rose-300 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    title="Deactivate Student Portal"
+                  >
+                    <UserX className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleOpenPortalModal(row)}
+                  className="p-1.5 text-brand-600 hover:text-brand-800 dark:hover:text-brand-300 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/40"
+                  title="Manage Portal Credentials & Password"
+                >
+                  <KeyRound className="w-4 h-4" />
+                </button>
+              </>
             )}
             <button
               onClick={() => {
@@ -752,26 +966,35 @@ export const StudentsPage: React.FC = () => {
               <CreditCard className="w-4 h-4" />
             </button>
             {isAdmin && (
-              row.is_active ? (
+              <>
+                {row.is_active ? (
+                  <button
+                    onClick={() => {
+                      setSelectedStudent(row);
+                      setIsArchiveDialogOpen(true);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    title="Archive Student Record"
+                  >
+                    <Archive className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleRestore(row)}
+                    className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                    title="Restore Student Record"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                )}
                 <button
-                  onClick={() => {
-                    setSelectedStudent(row);
-                    setIsArchiveDialogOpen(true);
-                  }}
+                  onClick={() => handleOpenSafeDelete(row)}
                   className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                  title="Archive Student Record"
+                  title="Permanently Delete Student"
                 >
-                  <Archive className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
-              ) : (
-                <button
-                  onClick={() => handleRestore(row)}
-                  className="p-1.5 text-slate-400 hover:text-emerald-600 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                  title="Restore Student Record"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              )
+              </>
             )}
           </div>
         );
@@ -907,7 +1130,7 @@ export const StudentsPage: React.FC = () => {
             </div>
             <div>
               <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                Student Portal Provisioning Control
+                Student Portal Controls
                 {selectedStudentIds.size > 0 ? (
                   <Badge variant="info">
                     {selectedStudentIds.size} student{selectedStudentIds.size > 1 ? 's' : ''} selected
@@ -919,20 +1142,38 @@ export const StudentsPage: React.FC = () => {
                 )}
               </div>
               <div className="text-[11px] text-slate-600 dark:text-slate-400">
-                Select unprovisioned students to activate accounts in bulk or individually
+                Batch activate, deactivate, or reactivate student portal access
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSelectAllUnprovisioned}
-              disabled={unprovisionedStudents.length === 0}
-            >
-              Select All Unprovisioned ({unprovisionedStudents.length})
-            </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={handleSelectAllUnprovisioned}
+                disabled={unprovisionedStudents.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Unprovisioned ({unprovisionedStudents.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllActive}
+                disabled={activePortalStudents.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Active ({activePortalStudents.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectAllInactive}
+                disabled={inactivePortalStudents.length === 0}
+                className="px-2 py-1 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-[11px] font-medium disabled:opacity-40"
+              >
+                Inactive ({inactivePortalStudents.length})
+              </button>
+            </div>
 
             {selectedStudentIds.size > 0 && (
               <Button
@@ -941,18 +1182,38 @@ export const StudentsPage: React.FC = () => {
                 onClick={handleClearSelection}
                 className="text-slate-600 dark:text-slate-400"
               >
-                Clear Selection
+                Clear
               </Button>
             )}
 
             <Button
               size="sm"
               variant="primary"
-              disabled={selectedStudentIds.size === 0}
-              onClick={handleStartBulkActivation}
-              leftIcon={<KeyRound className="w-3.5 h-3.5" />}
+              disabled={selectedUnprovisionedCount === 0}
+              onClick={() => handleStartBulkAction('activate')}
+              leftIcon={<UserPlus className="w-3.5 h-3.5" />}
             >
-              Bulk Activate Portals ({selectedStudentIds.size})
+              Bulk Activate ({selectedUnprovisionedCount})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={selectedActiveCount === 0}
+              onClick={() => handleStartBulkAction('deactivate')}
+              leftIcon={<UserX className="w-3.5 h-3.5" />}
+            >
+              Bulk Deactivate ({selectedActiveCount})
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedInactiveCount === 0}
+              onClick={() => handleStartBulkAction('reactivate')}
+              leftIcon={<UserCheck className="w-3.5 h-3.5" />}
+            >
+              Bulk Reactivate ({selectedInactiveCount})
             </Button>
           </div>
         </div>
@@ -1528,19 +1789,21 @@ export const StudentsPage: React.FC = () => {
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
-                    Account Status Controls
+                    Account Portal Access Status
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Temporarily disable or restore student login access
+                    {portalStudent.portal_status === 'inactive'
+                      ? 'Currently Deactivated — Student cannot log in'
+                      : 'Currently Active — Student can log in'}
                   </div>
                 </div>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant={portalStudent.portal_status === 'inactive' ? 'primary' : 'danger'}
                   isLoading={portalLoading}
                   onClick={handleTogglePortalStatus}
                 >
-                  Toggle Access
+                  {portalStudent.portal_status === 'inactive' ? 'Reactivate Access' : 'Deactivate Access'}
                 </Button>
               </div>
             </div>
@@ -1596,55 +1859,230 @@ export const StudentsPage: React.FC = () => {
         variant="danger"
       />
 
-      {/* 6. Modal: Bulk Student Portal Activation Confirmation */}
+      {/* 5b. Confirmation Dialog: Single Student Portal Status Toggle */}
+      <ConfirmationDialog
+        isOpen={portalToggleConfirm.isOpen}
+        onClose={() => setPortalToggleConfirm({ isOpen: false, student: null, active: false })}
+        onConfirm={handleExecutePortalToggle}
+        title={portalToggleConfirm.active ? 'Reactivate Student Portal' : 'Deactivate Student Portal'}
+        message={
+          portalToggleConfirm.active
+            ? `Are you sure you want to reactivate portal access for ${portalToggleConfirm.student?.full_name} (${portalToggleConfirm.student?.admission_no})? The student will be able to log in again.`
+            : `Are you sure you want to deactivate portal access for ${portalToggleConfirm.student?.full_name} (${portalToggleConfirm.student?.admission_no})? The student will be prevented from logging in immediately, but all academic and financial history will be preserved.`
+        }
+        confirmText={portalToggleConfirm.active ? 'Reactivate Portal' : 'Deactivate Portal'}
+        variant={portalToggleConfirm.active ? 'primary' : 'danger'}
+      />
+
+      {/* 5c. Modal: Safe Student Record Deletion */}
+      <Modal
+        isOpen={isSafeDeleteModalOpen}
+        onClose={() => setIsSafeDeleteModalOpen(false)}
+        title="Safe Student Record Deletion"
+        size="md"
+      >
+        <div className="space-y-4">
+          {isCheckingEligibility ? (
+            <div className="py-8 flex flex-col items-center justify-center space-y-3">
+              <div className="w-8 h-8 rounded-full border-2 border-brand-200 border-t-brand-600 animate-spin" />
+              <p className="text-xs text-slate-500">Inspecting academic and financial dependencies...</p>
+            </div>
+          ) : deletionEligibility?.has_dependencies ? (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <div className="font-bold text-amber-900 dark:text-amber-200">
+                    Permanent Deletion Blocked
+                  </div>
+                  <div className="text-amber-800 dark:text-amber-300">
+                    This student record has active historical records linked to their account. Deleting them permanently would violate institutional data integrity and break financial audit trails.
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2">
+                  Linked Institutional Dependencies:
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700">
+                    <span className="text-slate-500">Attendance Records:</span>{' '}
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      {deletionEligibility.dependencies.attendance_records}
+                    </span>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700">
+                    <span className="text-slate-500">Fee Invoices:</span>{' '}
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      {deletionEligibility.dependencies.fee_invoices}
+                    </span>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700">
+                    <span className="text-slate-500">Fee Payments:</span>{' '}
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      {deletionEligibility.dependencies.fee_payments}
+                    </span>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700">
+                    <span className="text-slate-500">Exam Marks:</span>{' '}
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      {deletionEligibility.dependencies.exam_marks}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                <b>Recommended Action:</b> Archive this student instead. Archiving marks the student inactive and revokes portal access while preserving all financial and examination history.
+              </p>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsSafeDeleteModalOpen(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setIsSafeDeleteModalOpen(false);
+                    if (deletingStudent) {
+                      setSelectedStudent(deletingStudent);
+                      setIsArchiveDialogOpen(true);
+                    }
+                  }}
+                  leftIcon={<Archive className="w-3.5 h-3.5" />}
+                >
+                  Archive Student Instead
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <div className="font-bold text-rose-900 dark:text-rose-200">
+                    Confirm Permanent Student Deletion
+                  </div>
+                  <div className="text-rose-800 dark:text-rose-300">
+                    This student has no attendance, exam, or fee history. Deletion is safe and permanent.
+                  </div>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-medium">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs space-y-1">
+                <div><b>Student:</b> {deletingStudent?.full_name}</div>
+                <div><b>Admission Number:</b> {deletingStudent?.admission_no}</div>
+                <div className="text-slate-500 text-[11px] mt-1">This will permanently erase the student record and any unlinked portal profile.</div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsSafeDeleteModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  isLoading={isDeletingStudent}
+                  onClick={handleExecuteSafeDelete}
+                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                >
+                  Permanently Delete Student
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* 6. Modal: Bulk Student Portal Action Confirmation */}
       <Modal
         isOpen={isBulkConfirmOpen}
         onClose={() => setIsBulkConfirmOpen(false)}
-        title={`Bulk Student Portal Activation (${selectedStudentIds.size} Students)`}
+        title={
+          bulkActionType === 'activate'
+            ? `Bulk Student Portal Activation (${eligibleBulkStudents.length} Students)`
+            : bulkActionType === 'deactivate'
+            ? `Bulk Student Portal Deactivation (${eligibleBulkStudents.length} Students)`
+            : `Bulk Student Portal Reactivation (${eligibleBulkStudents.length} Students)`
+        }
         size="lg"
       >
         <div className="space-y-4">
           <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl flex items-start gap-3">
             <ShieldCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
             <div className="text-xs text-blue-900 dark:text-blue-200">
-              <span className="font-semibold">Batch Account Provisioning:</span> Each selected student will be provisioned with an individual authentication account and linked profile. Their login identifier will be automatically derived from their official admission number (e.g. <span className="font-mono font-medium">student.adm20250001@islamiapublic.edu.pk</span>).
+              {bulkActionType === 'activate' && (
+                <span>
+                  <span className="font-semibold">Batch Account Provisioning:</span> Each selected unprovisioned student will be provisioned with an individual authentication account and linked profile. Their login identifier will be automatically derived from their official admission number.
+                </span>
+              )}
+              {bulkActionType === 'deactivate' && (
+                <span>
+                  <span className="font-semibold">Batch Portal Deactivation:</span> Each selected student will have their portal login access deactivated. All grades, attendance, and fee transactions are preserved completely.
+                </span>
+              )}
+              {bulkActionType === 'reactivate' && (
+                <span>
+                  <span className="font-semibold">Batch Portal Reactivation:</span> Each selected student will regain portal login access with their existing credentials.
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-              Default Initial Password
-            </label>
-            <Input
-              type="text"
-              value={bulkPassword}
-              onChange={(e) => setBulkPassword(e.target.value)}
-              placeholder="e.g. Student123!"
-              required
-            />
-            <p className="text-[11px] text-slate-500">
-              This password will be assigned to all newly created student accounts. Students can update their passwords upon login.
-            </p>
-          </div>
+          {bulkActionType === 'activate' && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                Default Initial Password
+              </label>
+              <Input
+                type="text"
+                value={bulkPassword}
+                onChange={(e) => setBulkPassword(e.target.value)}
+                placeholder="e.g. Student123!"
+                required
+              />
+              <p className="text-[11px] text-slate-500">
+                This password will be assigned to all newly created student accounts. Students can update their passwords upon login.
+              </p>
+            </div>
+          )}
 
           <div>
             <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2">
-              Selected Students Preview ({selectedStudentIds.size})
+              Eligible Students Preview ({eligibleBulkStudents.length})
             </div>
             <div className="max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-              {displayedStudents
-                .filter((s) => selectedStudentIds.has(s.id))
-                .map((student) => (
+              {eligibleBulkStudents.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500">
+                  No selected students match this operation criteria.
+                </div>
+              ) : (
+                eligibleBulkStudents.map((student) => (
                   <div key={student.id} className="p-2.5 flex items-center justify-between text-xs">
                     <div>
                       <span className="font-semibold text-slate-900 dark:text-slate-100">{student.full_name}</span>
                       <span className="ml-2 font-mono text-[11px] text-slate-500">({student.admission_no})</span>
                     </div>
-                    <span className="font-mono text-[11px] text-brand-600 dark:text-brand-400">
-                      student.{(student.admission_no || 'stu').toLowerCase().replace(/[^a-z0-9]/g, '')}@islamiapublic.edu.pk
-                    </span>
+                    <Badge
+                      variant={
+                        student.portal_status === 'active'
+                          ? 'success'
+                          : student.portal_status === 'inactive'
+                          ? 'danger'
+                          : 'default'
+                      }
+                    >
+                      {student.portal_status ? student.portal_status.toUpperCase() : 'NOT PROVISIONED'}
+                    </Badge>
                   </div>
-                ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -1653,11 +2091,20 @@ export const StudentsPage: React.FC = () => {
               Cancel
             </Button>
             <Button
-              variant="primary"
-              onClick={handleExecuteBulkActivation}
-              leftIcon={<KeyRound className="w-4 h-4" />}
+              variant={bulkActionType === 'deactivate' ? 'danger' : 'primary'}
+              disabled={eligibleBulkStudents.length === 0}
+              onClick={handleExecuteBulkAction}
+              leftIcon={
+                bulkActionType === 'activate' ? (
+                  <UserPlus className="w-4 h-4" />
+                ) : bulkActionType === 'deactivate' ? (
+                  <UserX className="w-4 h-4" />
+                ) : (
+                  <UserCheck className="w-4 h-4" />
+                )
+              }
             >
-              Confirm & Activate {selectedStudentIds.size} Portals
+              Confirm & {bulkActionType === 'activate' ? 'Activate' : bulkActionType === 'deactivate' ? 'Deactivate' : 'Reactivate'} {eligibleBulkStudents.length} Portals
             </Button>
           </div>
         </div>
