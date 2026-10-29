@@ -28,5 +28,8 @@ dist-ssr
 .env.production
 .env.local
 
+# Vercel
+.vercel
+
 # Test coverage
 coverage
