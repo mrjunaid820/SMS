@@ -2810,6 +2810,85 @@ export const attendanceApi = {
       .filter(a => a.enrollment_id === enrollmentId)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
+
+  getAttendanceSummaryByPeriod: async (
+    period: 'today' | 'this_week' | 'this_month' = 'this_month'
+  ): Promise<{
+    total: number;
+    present: number;
+    absent: number;
+    late: number;
+    leave: number;
+    presentPercentage: number;
+    absentPercentage: number;
+    latePercentage: number;
+    leavePercentage: number;
+  }> => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    let startDate = todayStr;
+    const endDate = todayStr;
+
+    if (period === 'this_week') {
+      const day = now.getDay();
+      const diffToMonday = (day === 0 ? -6 : 1) - day;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diffToMonday);
+      startDate = monday.toISOString().split('T')[0];
+    } else if (period === 'this_month') {
+      startDate = `${todayStr.slice(0, 7)}-01`;
+    }
+
+    let records: { status: AttendanceStatus; date: string }[] = [];
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('status, date')
+          .gte('date', startDate)
+          .lte('date', endDate);
+        if (!error && data) {
+          records = data as any;
+        }
+      } catch (e) {
+        console.warn('Error fetching attendance summary by period', e);
+      }
+    }
+
+    if (records.length === 0 && !isLiveSupabaseConfigured()) {
+      const all = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
+      records = all.filter(a => a.date >= startDate && a.date <= endDate);
+      if (records.length === 0 && all.length > 0) {
+        // Fallback for mock demo: use latest recorded session
+        const latestDate = all.reduce((max, a) => (a.date > max ? a.date : max), all[0].date);
+        records = all.filter(a => a.date === latestDate);
+      }
+    }
+
+    const total = records.length;
+    const present = records.filter(r => r.status === 'Present').length;
+    const absent = records.filter(r => r.status === 'Absent').length;
+    const late = records.filter(r => r.status === 'Late').length;
+    const leave = records.filter(r => r.status === 'Leave').length;
+
+    const presentPercentage = total > 0 ? Math.round(((present + late) / total) * 100) : 0;
+    const absentPercentage = total > 0 ? Math.round((absent / total) * 100) : 0;
+    const latePercentage = total > 0 ? Math.round((late / total) * 100) : 0;
+    const leavePercentage = total > 0 ? Math.round((leave / total) * 100) : 0;
+
+    return {
+      total,
+      present,
+      absent,
+      late,
+      leave,
+      presentPercentage,
+      absentPercentage,
+      latePercentage,
+      leavePercentage,
+    };
+  },
 };
 
 // -------------------------------------------------------------
