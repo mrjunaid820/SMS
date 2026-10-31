@@ -105,6 +105,8 @@ export const StudentsPage: React.FC = () => {
   } | null>(null);
   const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [isDeactivatingStudent, setIsDeactivatingStudent] = useState(false);
+  const [safeRemovalReason, setSafeRemovalReason] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Bulk Student Portal State
@@ -729,6 +731,7 @@ export const StudentsPage: React.FC = () => {
     setDeletingStudent(student);
     setDeletionEligibility(null);
     setDeleteError(null);
+    setSafeRemovalReason('');
     setIsSafeDeleteModalOpen(true);
     setIsCheckingEligibility(true);
     try {
@@ -763,6 +766,32 @@ export const StudentsPage: React.FC = () => {
       setDeleteError(err.message || 'Failed to delete student.');
     } finally {
       setIsDeletingStudent(false);
+    }
+  };
+
+  const handleExecuteSafeDeactivate = async () => {
+    if (!deletingStudent) return;
+    setIsDeactivatingStudent(true);
+    setDeleteError(null);
+    try {
+      const res = await studentApi.safelyDeactivateAndRemoveStudent(
+        deletingStudent.id,
+        safeRemovalReason || 'Safely removed from active roster by administrator (historical records retained)',
+        {
+          id: user?.id,
+          name: user?.full_name,
+          role: user?.role,
+        }
+      );
+      setIsSafeDeleteModalOpen(false);
+      setDeletingStudent(null);
+      setSafeRemovalReason('');
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to safely remove student.');
+    } finally {
+      setIsDeactivatingStudent(false);
     }
   };
 
@@ -1874,11 +1903,15 @@ export const StudentsPage: React.FC = () => {
         variant={portalToggleConfirm.active ? 'primary' : 'danger'}
       />
 
-      {/* 5c. Modal: Safe Student Record Deletion */}
+      {/* 5c. Modal: Safe Student Record Deletion & Removal */}
       <Modal
         isOpen={isSafeDeleteModalOpen}
         onClose={() => setIsSafeDeleteModalOpen(false)}
-        title="Safe Student Record Deletion"
+        title={
+          deletionEligibility?.has_dependencies
+            ? 'Student Removal & Institutional Record Protection'
+            : 'Permanent Student Record Deletion'
+        }
         size="md"
       >
         <div className="space-y-4">
@@ -1893,10 +1926,10 @@ export const StudentsPage: React.FC = () => {
                 <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div className="text-xs space-y-1">
                   <div className="font-bold text-amber-900 dark:text-amber-200">
-                    Permanent Deletion Blocked
+                    Permanent Deletion Blocked — Historical Records Retained
                   </div>
                   <div className="text-amber-800 dark:text-amber-300">
-                    This student record has active historical records linked to their account. Deleting them permanently would violate institutional data integrity and break financial audit trails.
+                    This student record has active historical records linked to their account. Deleting them permanently would violate institutional data integrity, delete financial transactions, and break audit trails.
                   </div>
                 </div>
               </div>
@@ -1933,26 +1966,44 @@ export const StudentsPage: React.FC = () => {
                 </div>
               </div>
 
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                <b>Recommended Action:</b> Archive this student instead. Archiving marks the student inactive and revokes portal access while preserving all financial and examination history.
-              </p>
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl text-xs space-y-2">
+                <div className="font-semibold text-blue-900 dark:text-blue-200">
+                  Recommended Authorized Action: Safe Deactivation & Removal
+                </div>
+                <div className="text-blue-800 dark:text-blue-300">
+                  This will safely remove <b>{deletingStudent?.full_name}</b> from all active class lists, revoke their student portal login access, and preserve all attendance, fee payments, and examination marks for institutional record-keeping.
+                </div>
+                <div className="mt-2 space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
+                    Reason for removal (optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={safeRemovalReason}
+                    onChange={(e) => setSafeRemovalReason(e.target.value)}
+                    placeholder="e.g., Transferred to another institution, Withdrawn, Graduated..."
+                    className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-medium">
+                  {deleteError}
+                </div>
+              )}
 
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setIsSafeDeleteModalOpen(false)}>
-                  Close
+                  Cancel
                 </Button>
                 <Button
                   variant="primary"
-                  onClick={() => {
-                    setIsSafeDeleteModalOpen(false);
-                    if (deletingStudent) {
-                      setSelectedStudent(deletingStudent);
-                      setIsArchiveDialogOpen(true);
-                    }
-                  }}
+                  isLoading={isDeactivatingStudent}
+                  onClick={handleExecuteSafeDeactivate}
                   leftIcon={<Archive className="w-3.5 h-3.5" />}
                 >
-                  Archive Student Instead
+                  Deactivate & Remove from Active Roster
                 </Button>
               </div>
             </div>
@@ -1965,7 +2016,7 @@ export const StudentsPage: React.FC = () => {
                     Confirm Permanent Student Deletion
                   </div>
                   <div className="text-rose-800 dark:text-rose-300">
-                    This student has no attendance, exam, or fee history. Deletion is safe and permanent.
+                    This student has no attendance, exam, or fee history. Permanent deletion is safe and irreversible.
                   </div>
                 </div>
               </div>
@@ -1979,7 +2030,7 @@ export const StudentsPage: React.FC = () => {
               <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-xs space-y-1">
                 <div><b>Student:</b> {deletingStudent?.full_name}</div>
                 <div><b>Admission Number:</b> {deletingStudent?.admission_no}</div>
-                <div className="text-slate-500 text-[11px] mt-1">This will permanently erase the student record and any unlinked portal profile.</div>
+                <div className="text-slate-500 text-[11px] mt-1">This will permanently erase the student record, empty enrollments, and any unlinked portal profile from the database.</div>
               </div>
 
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">

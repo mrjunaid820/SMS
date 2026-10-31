@@ -1482,11 +1482,32 @@ export const studentApi = {
   },
 
   archiveStudent: async (id: string, reason: string, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
-    return studentApi.updateStudent(
+    const updated = await studentApi.updateStudent(
       id,
       { is_active: false, archived_at: new Date().toISOString(), archive_reason: reason },
       actor
     );
+
+    // Also deactivate student portal account if provisioned
+    if (updated.profile_id) {
+      if (isLiveSupabaseConfigured()) {
+        try {
+          await supabase.from('profiles').update({ is_active: false, updated_at: new Date().toISOString() }).eq('id', updated.profile_id);
+        } catch (e) {
+          console.warn('Failed to deactivate portal profile on archive:', e);
+        }
+      } else {
+        const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+        const pIdx = profiles.findIndex((p) => p.id === updated.profile_id);
+        if (pIdx !== -1) {
+          profiles[pIdx].is_active = false;
+          profiles[pIdx].updated_at = new Date().toISOString();
+          setStorage('profiles', [...profiles]);
+        }
+      }
+    }
+
+    return updated;
   },
 
   restoreStudent: async (id: string, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
@@ -2575,6 +2596,115 @@ export const studentApi = {
     return {
       success: true,
       message: `Student "${student.full_name}" (Admission No: ${student.admission_no}) has been permanently deleted.`,
+    };
+  },
+
+  safelyDeactivateAndRemoveStudent: async (
+    studentId: string,
+    reason?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; student: Student }> => {
+    if (actor && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to remove student records.');
+    }
+
+    const archiveReason = reason || 'Safely removed from active roster by administrator (historical records retained)';
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_safe_deactivate_student', {
+          p_student_id: studentId,
+          p_reason: archiveReason,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          const { data: updated } = await supabase.from('students').select('*').eq('id', studentId).single();
+          return {
+            success: true,
+            message: rpcData.message || 'Student record safely deactivated and removed from active roster.',
+            student: updated,
+          };
+        }
+      } catch (e) {
+        console.warn('RPC admin_safe_deactivate_student fallback:', e);
+      }
+
+      const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
+      if (!student) throw new Error('Student record not found in database.');
+
+      const { data: updated, error: updErr } = await supabase
+        .from('students')
+        .update({
+          is_active: false,
+          archived_at: new Date().toISOString(),
+          archive_reason: archiveReason,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', studentId)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+
+      if (student.profile_id) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              is_active: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', student.profile_id);
+        } catch (e) {
+          console.warn('Failed to revoke profile access on safe removal:', e);
+        }
+      }
+
+      await logAudit(actor || {}, 'STUDENT_RECORD_SAFELY_DEACTIVATED', 'students', studentId, {
+        student_name: student.full_name,
+        admission_no: student.admission_no,
+        reason: archiveReason,
+        historical_records_retained: true,
+      });
+
+      return {
+        success: true,
+        message: `Student "${student.full_name}" (Admission No: ${student.admission_no}) has been safely deactivated and removed from the active roster. All historical records have been preserved.`,
+        student: updated,
+      };
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const sIdx = students.findIndex((s) => s.id === studentId);
+    if (sIdx === -1) throw new Error('Student record not found.');
+    const student = students[sIdx];
+
+    student.is_active = false;
+    student.archived_at = new Date().toISOString();
+    student.archive_reason = archiveReason;
+    student.updated_at = new Date().toISOString();
+    setStorage('students', [...students]);
+
+    if (student.profile_id) {
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+      const pIdx = profiles.findIndex((p) => p.id === student.profile_id);
+      if (pIdx !== -1) {
+        profiles[pIdx].is_active = false;
+        profiles[pIdx].updated_at = new Date().toISOString();
+        setStorage('profiles', [...profiles]);
+      }
+    }
+
+    await logAudit(actor || {}, 'STUDENT_RECORD_SAFELY_DEACTIVATED', 'students', studentId, {
+      student_name: student.full_name,
+      admission_no: student.admission_no,
+      reason: archiveReason,
+      historical_records_retained: true,
+    });
+
+    return {
+      success: true,
+      message: `Student "${student.full_name}" (Admission No: ${student.admission_no}) has been safely deactivated and removed from the active roster. All historical records have been preserved.`,
+      student,
     };
   },
 };

@@ -294,7 +294,7 @@ describe('Portal Lifecycle (Activation, Deactivation, Reactivation) & Safe Stude
     });
   });
 
-  describe('Part 3: Safe Student Deletion & Dependency Protection', () => {
+  describe('Part 3: Safe Student Deletion, Removal & Dependency Protection', () => {
     it('allows safe permanent deletion of a clean student with no academic or financial history', async () => {
       // Create a clean student (only draft enrollment, 0 attendance, 0 fee invoices, 0 marks)
       const { student } = await studentApi.createStudentWithEnrollment(
@@ -320,6 +320,7 @@ describe('Portal Lifecycle (Activation, Deactivation, Reactivation) & Safe Stude
       expect(eligibility.recommendation).toBe('permanent_deletion');
       expect(eligibility.dependencies.attendance_records).toBe(0);
       expect(eligibility.dependencies.fee_invoices).toBe(0);
+      expect(eligibility.dependencies.fee_payments).toBe(0);
       expect(eligibility.dependencies.exam_marks).toBe(0);
 
       // 2. Safe deletion execution
@@ -332,11 +333,77 @@ describe('Portal Lifecycle (Activation, Deactivation, Reactivation) & Safe Stude
       expect(allStudents.find((s) => s.id === student.id)).toBeUndefined();
     });
 
-    it('blocks permanent deletion and guides to archiving when student has historical dependencies', async () => {
+    it('blocks permanent deletion and safely deactivates student when attendance records exist', async () => {
       // 1. Create student
       const { student, enrollment } = await studentApi.createStudentWithEnrollment(
         {
-          full_name: 'Student With Invoices',
+          full_name: 'Student With Attendance',
+          gender: 'Female',
+          date_of_birth: '2012-03-14',
+          guardian_name: 'Attendance Guardian',
+          guardian_relation: 'Mother',
+          guardian_phone: '03006666666',
+          admission_date: '2025-04-01',
+          address: 'Lahore',
+        },
+        'sess-2025-26',
+        'sec-9a',
+        adminActor
+      );
+
+      // 2. Add attendance records
+      const attendances = [
+        {
+          id: 'att-101',
+          enrollment_id: enrollment.id,
+          date: '2026-10-20',
+          status: 'Present',
+        },
+        {
+          id: 'att-102',
+          enrollment_id: enrollment.id,
+          date: '2026-10-21',
+          status: 'Late',
+        },
+      ];
+      localStorage.setItem('sms_attendance', JSON.stringify(attendances));
+
+      // 3. Pre-check
+      const eligibility = await studentApi.checkDeletionEligibility(student.id, adminActor);
+      expect(eligibility.has_dependencies).toBe(true);
+      expect(eligibility.eligible_for_permanent_deletion).toBe(false);
+      expect(eligibility.dependencies.attendance_records).toBe(2);
+
+      // 4. Hard deletion is strictly blocked
+      await expect(
+        studentApi.safeDeleteStudent(student.id, adminActor)
+      ).rejects.toThrow(/Permanent Deletion Blocked/);
+
+      // 5. Safe deactivation & removal from active roster
+      const removalRes = await studentApi.safelyDeactivateAndRemoveStudent(
+        student.id,
+        'Transferred to Lahore Model School',
+        adminActor
+      );
+      expect(removalRes.success).toBe(true);
+      expect(removalRes.student.is_active).toBe(false);
+      expect(removalRes.student.archive_reason).toContain('Transferred');
+
+      // 6. Verify historical records preserved intact
+      const savedAttendance = JSON.parse(localStorage.getItem('sms_attendance') || '[]');
+      expect(savedAttendance.length).toBe(2);
+      expect(savedAttendance[0].enrollment_id).toBe(enrollment.id);
+
+      // Student is excluded from active student list
+      const activeStudents = await studentApi.getStudents(false);
+      expect(activeStudents.find((s) => s.id === student.id)).toBeUndefined();
+    });
+
+    it('blocks permanent deletion and safely deactivates student when fee invoices and payments exist', async () => {
+      // 1. Create student
+      const { student, enrollment } = await studentApi.createStudentWithEnrollment(
+        {
+          full_name: 'Student With Invoices & Payments',
           gender: 'Male',
           date_of_birth: '2011-08-10',
           guardian_name: 'Finance Guardian',
@@ -350,7 +417,7 @@ describe('Portal Lifecycle (Activation, Deactivation, Reactivation) & Safe Stude
         adminActor
       );
 
-      // 2. Add an invoice dependency
+      // 2. Add an invoice and payment dependency
       const invoices = [
         {
           id: 'inv-test-999',
@@ -360,55 +427,156 @@ describe('Portal Lifecycle (Activation, Deactivation, Reactivation) & Safe Stude
           status: 'paid',
         },
       ];
+      const payments = [
+        {
+          id: 'pay-test-999',
+          invoice_id: 'inv-test-999',
+          receipt_no: 'REC-999',
+          amount: 5000,
+          payment_date: '2026-10-15',
+        },
+      ];
       localStorage.setItem('sms_fee_invoices', JSON.stringify(invoices));
+      localStorage.setItem('sms_fee_payments', JSON.stringify(payments));
 
       // 3. Check deletion eligibility
       const eligibility = await studentApi.checkDeletionEligibility(student.id, adminActor);
       expect(eligibility.has_dependencies).toBe(true);
       expect(eligibility.eligible_for_permanent_deletion).toBe(false);
-      expect(eligibility.recommendation).toBe('archive_recommended');
       expect(eligibility.dependencies.fee_invoices).toBe(1);
-      expect(eligibility.explanation).toContain('fee invoices');
-      expect(eligibility.explanation).toContain('Archive Student');
+      expect(eligibility.dependencies.fee_payments).toBe(1);
 
-      // 4. Attempting permanent deletion must throw an explicit error!
+      // 4. Attempting permanent deletion must throw
       await expect(
         studentApi.safeDeleteStudent(student.id, adminActor)
       ).rejects.toThrow(/Permanent Deletion Blocked/);
 
-      // 5. Archiving works safely and preserves the record
-      const archived = await studentApi.archiveStudent(
+      // 5. Safe deactivation & removal
+      const res = await studentApi.safelyDeactivateAndRemoveStudent(
         student.id,
-        'Graduated or transferred with preserved records',
+        'Withdrawn with settled accounts',
         adminActor
       );
-      expect(archived.is_active).toBe(false);
-      expect(archived.archive_reason).toContain('Graduated');
+      expect(res.success).toBe(true);
+      expect(res.student.is_active).toBe(false);
 
-      // Student still exists in system history
-      const historyStudents = await studentApi.getStudents(true);
-      expect(historyStudents.find((s) => s.id === student.id)).toBeDefined();
+      // 6. Verify financial ledger is untouched
+      const storedInvoices = JSON.parse(localStorage.getItem('sms_fee_invoices') || '[]');
+      const storedPayments = JSON.parse(localStorage.getItem('sms_fee_payments') || '[]');
+      expect(storedInvoices.length).toBe(1);
+      expect(storedPayments.length).toBe(1);
+      expect(storedPayments[0].receipt_no).toBe('REC-999');
+    });
+
+    it('blocks permanent deletion and safely deactivates student when exam marks exist', async () => {
+      // 1. Create student
+      const { student, enrollment } = await studentApi.createStudentWithEnrollment(
+        {
+          full_name: 'Student With Exam Marks',
+          gender: 'Female',
+          date_of_birth: '2012-01-25',
+          guardian_name: 'Academic Guardian',
+          guardian_relation: 'Father',
+          guardian_phone: '03008888888',
+          admission_date: '2025-04-01',
+          address: 'Rawalpindi',
+        },
+        'sess-2025-26',
+        'sec-9a',
+        adminActor
+      );
+
+      // 2. Add exam marks
+      const marks = [
+        {
+          id: 'mark-001',
+          enrollment_id: enrollment.id,
+          exam_subject_id: 'es-math-midterm',
+          marks_obtained: 88,
+          total_marks: 100,
+        },
+      ];
+      localStorage.setItem('sms_marks', JSON.stringify(marks));
+
+      // 3. Pre-check
+      const eligibility = await studentApi.checkDeletionEligibility(student.id, adminActor);
+      expect(eligibility.has_dependencies).toBe(true);
+      expect(eligibility.dependencies.exam_marks).toBe(1);
+
+      // 4. Hard deletion blocked
+      await expect(
+        studentApi.safeDeleteStudent(student.id, adminActor)
+      ).rejects.toThrow(/Permanent Deletion Blocked/);
+
+      // 5. Safe deactivation
+      const removal = await studentApi.safelyDeactivateAndRemoveStudent(
+        student.id,
+        'Completed term and relocated',
+        adminActor
+      );
+      expect(removal.success).toBe(true);
+      expect(removal.student.is_active).toBe(false);
+
+      // 6. Exam marks remain intact in the academic record
+      const storedMarks = JSON.parse(localStorage.getItem('sms_marks') || '[]');
+      expect(storedMarks.length).toBe(1);
+      expect(storedMarks[0].marks_obtained).toBe(88);
+    });
+
+    it('strictly forbids unauthorized users from deleting or deactivating students', async () => {
+      const all = await studentApi.getStudents(true);
+      const student = all[0];
+
+      // Teacher actor trying to check eligibility
+      await expect(
+        studentApi.checkDeletionEligibility(student.id, teacherActor)
+      ).rejects.toThrow(/Unauthorized/);
+
+      // Teacher actor trying permanent deletion
+      await expect(
+        studentApi.safeDeleteStudent(student.id, teacherActor)
+      ).rejects.toThrow(/Unauthorized/);
+
+      // Teacher actor trying safe deactivation
+      await expect(
+        studentApi.safelyDeactivateAndRemoveStudent(student.id, 'Hacked reason', teacherActor)
+      ).rejects.toThrow(/Unauthorized/);
+
+      // Verify student remains active and untouched
+      const after = await studentApi.getStudents(true);
+      expect(after.find((s) => s.id === student.id)?.is_active).toBe(student.is_active);
     });
   });
 
-  describe('Part 4: Database Migration 014 Verification', () => {
-    it('verifies SQL file exists and contains all required RPC functions and RLS policies', () => {
-      const migrationPath = path.resolve(
+  describe('Part 4: Database Migrations 014 & 016 Verification', () => {
+    it('verifies SQL files exist and contain all required RPC functions and RLS policies', () => {
+      const migration14Path = path.resolve(
         process.cwd(),
         'supabase/migrations/014_portal_lifecycle_and_safe_student_deletion.sql'
       );
-      expect(fs.existsSync(migrationPath)).toBe(true);
+      expect(fs.existsSync(migration14Path)).toBe(true);
 
-      const content = fs.readFileSync(migrationPath, 'utf-8');
-      expect(content).toContain('admin_set_student_portal_active');
-      expect(content).toContain('admin_bulk_set_student_portal_active');
-      expect(content).toContain('admin_set_teacher_portal_active');
-      expect(content).toContain('admin_bulk_set_teacher_portal_active');
-      expect(content).toContain('admin_check_student_deletion_eligibility');
-      expect(content).toContain('admin_safe_delete_student');
-      expect(content).toContain('SECURITY DEFINER');
-      expect(content).toContain('profiles.is_active = TRUE');
-      expect(content).toContain('GRANT EXECUTE ON FUNCTION public.admin_safe_delete_student');
+      const content14 = fs.readFileSync(migration14Path, 'utf-8');
+      expect(content14).toContain('admin_set_student_portal_active');
+      expect(content14).toContain('admin_bulk_set_student_portal_active');
+      expect(content14).toContain('admin_set_teacher_portal_active');
+      expect(content14).toContain('admin_bulk_set_teacher_portal_active');
+      expect(content14).toContain('admin_check_student_deletion_eligibility');
+      expect(content14).toContain('admin_safe_delete_student');
+      expect(content14).toContain('SECURITY DEFINER');
+
+      const migration16Path = path.resolve(
+        process.cwd(),
+        'supabase/migrations/016_fix_student_deletion_and_safe_removal.sql'
+      );
+      expect(fs.existsSync(migration16Path)).toBe(true);
+
+      const content16 = fs.readFileSync(migration16Path, 'utf-8');
+      expect(content16).toContain('admin_safe_deactivate_student');
+      expect(content16).toContain('admin_safe_delete_student');
+      expect(content16).toContain('admin_check_student_deletion_eligibility');
+      expect(content16).toContain('SECURITY DEFINER');
+      expect(content16).toContain('GRANT EXECUTE ON FUNCTION public.admin_safe_deactivate_student');
     });
   });
 });
