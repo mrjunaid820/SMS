@@ -169,6 +169,10 @@ export interface FeeInvoice {
   due_date: string;
   total_amount: number;
   discount_amount: number;
+  discount_type?: 'fixed' | 'percentage' | 'waiver';
+  discount_percentage?: number;
+  discount_reason?: string;
+  notes?: string;
   net_amount: number;
   paid_amount: number;
   status: InvoiceStatus;
@@ -177,6 +181,7 @@ export interface FeeInvoice {
   updated_at: string;
   // joined
   enrollment?: Enrollment;
+  academic_session?: AcademicSession;
   items?: FeeInvoiceItem[];
   payments?: FeePayment[];
 }
@@ -186,7 +191,27 @@ export interface FeeInvoiceItem {
   invoice_id: string;
   description: string;
   amount: number;
+  is_waived?: boolean;
+  original_amount?: number;
   created_at: string;
+}
+
+export interface FeeInvoiceUpdateInput {
+  due_date?: string;
+  billing_month?: string;
+  notes?: string;
+  discount_type?: 'fixed' | 'percentage' | 'waiver';
+  discount_percentage?: number;
+  discount_amount?: number;
+  discount_reason?: string;
+  adjustment_reason?: string;
+  items?: Array<{
+    id?: string;
+    description: string;
+    amount: number;
+    is_waived?: boolean;
+    original_amount?: number;
+  }>;
 }
 
 export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'Cheque' | 'Online/Slip' | 'EasyPaisa/JazzCash';

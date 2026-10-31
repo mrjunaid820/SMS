@@ -14,6 +14,8 @@ import {
   AttendanceStatus,
   FeeStructure,
   FeeInvoice,
+  FeeInvoiceItem,
+  FeeInvoiceUpdateInput,
   InvoiceStatus,
   FeePayment,
   FeePaymentReversal,
@@ -3274,6 +3276,389 @@ export const feeApi = {
       invoiceCount: invoices.length,
       paidCount: invoices.filter(i => i.status === 'Paid').length,
       unpaidCount: invoices.filter(i => i.status === 'Unpaid' || i.status === 'Overdue').length,
+    };
+  },
+
+  updateInvoice: async (
+    invoiceId: string,
+    updates: FeeInvoiceUpdateInput,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<FeeInvoice> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to modify fee challans.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_update_fee_challan', {
+          p_invoice_id: invoiceId,
+          p_due_date: updates.due_date || new Date().toISOString().split('T')[0],
+          p_notes: updates.notes || null,
+          p_discount_type: updates.discount_type || 'fixed',
+          p_discount_percentage: updates.discount_percentage || 0,
+          p_discount_amount: updates.discount_amount || 0,
+          p_discount_reason: updates.discount_reason || null,
+          p_adjustment_reason: updates.adjustment_reason || 'Administrative adjustment',
+          p_items: updates.items || [],
+        });
+
+        if (!rpcErr && rpcData?.success) {
+          const fresh = await feeApi.getInvoiceById(invoiceId);
+          if (fresh) return fresh;
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_update_fee_challan')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes('Could not find the function') && !e.message.includes('admin_update_fee_challan')) {
+          throw e;
+        }
+      }
+
+      // Supabase direct fallback
+      const { data: inv, error: invErr } = await supabase.from('fee_invoices').select('*, items:fee_invoice_items(*)').eq('id', invoiceId).single();
+      if (invErr || !inv) throw new Error('Invoice not found in database.');
+
+      const items = updates.items || (inv.items || []);
+      let totalAmount = 0;
+      for (const item of items) {
+        if (Number(item.amount) < 0) throw new Error('Fee item amount cannot be negative.');
+        totalAmount += Number(item.amount);
+      }
+
+      let discountAmount = 0;
+      const discountType = updates.discount_type || inv.discount_type || 'fixed';
+      if (discountType === 'percentage') {
+        const pct = Number(updates.discount_percentage ?? inv.discount_percentage ?? 0);
+        if (pct < 0 || pct > 100) throw new Error('Discount percentage must be between 0 and 100.');
+        discountAmount = Math.round((pct / 100) * totalAmount * 100) / 100;
+      } else if (discountType === 'waiver') {
+        discountAmount = totalAmount;
+      } else {
+        discountAmount = Number(updates.discount_amount ?? inv.discount_amount ?? 0);
+      }
+
+      if (discountAmount < 0) throw new Error('Discount amount cannot be negative.');
+      if (discountAmount > totalAmount) {
+        throw new Error(`Discount amount (Rs. ${discountAmount}) cannot exceed eligible total fee (Rs. ${totalAmount}).`);
+      }
+      if (discountAmount > 0 && !updates.discount_reason?.trim() && !inv.discount_reason?.trim()) {
+        throw new Error('A valid discount/waiver reason is required when applying a discount.');
+      }
+
+      const netAmount = totalAmount - discountAmount;
+      const paidAmount = Number(inv.paid_amount || 0);
+
+      if (netAmount < paidAmount) {
+        throw new Error(`Cannot reduce payable amount (Rs. ${netAmount}) below already paid amount (Rs. ${paidAmount}). Please reverse excess payments before adjusting challan.`);
+      }
+
+      let newStatus: InvoiceStatus;
+      if (netAmount === 0 || paidAmount >= netAmount) {
+        newStatus = 'Paid';
+      } else if (paidAmount > 0) {
+        newStatus = 'Partially Paid';
+      } else {
+        const dueDate = updates.due_date || inv.due_date;
+        newStatus = new Date(dueDate) < new Date() ? 'Overdue' : 'Unpaid';
+      }
+
+      const { data: updatedInv, error: updErr } = await supabase
+        .from('fee_invoices')
+        .update({
+          due_date: updates.due_date || inv.due_date,
+          total_amount: totalAmount,
+          discount_type: discountType,
+          discount_percentage: updates.discount_percentage ?? 0,
+          discount_amount: discountAmount,
+          discount_reason: updates.discount_reason || inv.discount_reason || null,
+          net_amount: netAmount,
+          status: newStatus,
+          notes: updates.notes !== undefined ? updates.notes : inv.notes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', invoiceId)
+        .select()
+        .single();
+      if (updErr) throw new Error(`Database error updating invoice: ${updErr.message}`);
+
+      // Recreate line items
+      await supabase.from('fee_invoice_items').delete().eq('invoice_id', invoiceId);
+      if (items.length > 0) {
+        const newItems = items.map((it: any) => ({
+          id: it.id && it.id.includes('-') && it.id.length > 10 ? it.id : generateUUID(),
+          invoice_id: invoiceId,
+          description: it.description,
+          amount: Number(it.amount),
+          is_waived: !!it.is_waived,
+          original_amount: it.original_amount !== undefined ? Number(it.original_amount) : Number(it.amount),
+          created_at: new Date().toISOString(),
+        }));
+        await supabase.from('fee_invoice_items').insert(newItems);
+      }
+
+      await logAudit(actor || {}, 'CHALLAN_FINANCIALLY_ADJUSTED', 'fee_invoices', invoiceId, {
+        previous_net: inv.net_amount,
+        new_net: netAmount,
+        discount_amount: discountAmount,
+        discount_reason: updates.discount_reason,
+        adjustment_reason: updates.adjustment_reason,
+      });
+
+      const fresh = await feeApi.getInvoiceById(invoiceId);
+      return fresh || updatedInv;
+    }
+
+    // LocalStorage fallback
+    const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
+    const invIdx = invoices.findIndex(i => i.id === invoiceId);
+    if (invIdx === -1) throw new Error('Invoice not found.');
+    const inv = invoices[invIdx];
+
+    const items = updates.items || (inv.items || []);
+    let totalAmount = 0;
+    for (const item of items) {
+      if (Number(item.amount) < 0) throw new Error('Fee item amount cannot be negative.');
+      totalAmount += Number(item.amount);
+    }
+
+    let discountAmount = 0;
+    const discountType = updates.discount_type || inv.discount_type || 'fixed';
+    if (discountType === 'percentage') {
+      const pct = Number(updates.discount_percentage ?? inv.discount_percentage ?? 0);
+      if (pct < 0 || pct > 100) throw new Error('Discount percentage must be between 0 and 100.');
+      discountAmount = Math.round((pct / 100) * totalAmount * 100) / 100;
+    } else if (discountType === 'waiver') {
+      discountAmount = totalAmount;
+    } else {
+      discountAmount = Number(updates.discount_amount ?? inv.discount_amount ?? 0);
+    }
+
+    if (discountAmount < 0) throw new Error('Discount amount cannot be negative.');
+    if (discountAmount > totalAmount) {
+      throw new Error(`Discount amount (Rs. ${discountAmount}) cannot exceed eligible total fee (Rs. ${totalAmount}).`);
+    }
+    if (discountAmount > 0 && !updates.discount_reason?.trim() && !inv.discount_reason?.trim()) {
+      throw new Error('A valid discount/waiver reason is required when applying a discount.');
+    }
+
+    const netAmount = totalAmount - discountAmount;
+    const paidAmount = Number(inv.paid_amount || 0);
+
+    if (netAmount < paidAmount) {
+      throw new Error(`Cannot reduce payable amount (Rs. ${netAmount}) below already paid amount (Rs. ${paidAmount}). Please reverse excess payments before adjusting challan.`);
+    }
+
+    let newStatus: InvoiceStatus;
+    if (netAmount === 0 || paidAmount >= netAmount) {
+      newStatus = 'Paid';
+    } else if (paidAmount > 0) {
+      newStatus = 'Partially Paid';
+    } else {
+      const dueDate = updates.due_date || inv.due_date;
+      newStatus = new Date(dueDate) < new Date() ? 'Overdue' : 'Unpaid';
+    }
+
+    const updatedItems: FeeInvoiceItem[] = items.map(it => ({
+      id: it.id || generateUUID(),
+      invoice_id: invoiceId,
+      description: it.description,
+      amount: Number(it.amount),
+      is_waived: !!it.is_waived,
+      original_amount: it.original_amount !== undefined ? Number(it.original_amount) : Number(it.amount),
+      created_at: new Date().toISOString(),
+    }));
+
+    const updatedInvoice: FeeInvoice = {
+      ...inv,
+      due_date: updates.due_date || inv.due_date,
+      billing_month: updates.billing_month || inv.billing_month,
+      notes: updates.notes !== undefined ? updates.notes : inv.notes,
+      total_amount: totalAmount,
+      discount_type: discountType,
+      discount_percentage: updates.discount_percentage ?? 0,
+      discount_amount: discountAmount,
+      discount_reason: updates.discount_reason || inv.discount_reason,
+      net_amount: netAmount,
+      status: newStatus,
+      items: updatedItems,
+      updated_at: new Date().toISOString(),
+    };
+
+    invoices[invIdx] = updatedInvoice;
+    setStorage('invoices', [...invoices]);
+
+    await logAudit(actor || {}, 'CHALLAN_FINANCIALLY_ADJUSTED', 'fee_invoices', invoiceId, {
+      invoice_no: inv.invoice_no,
+      previous_net: inv.net_amount,
+      new_net: netAmount,
+      discount_amount: discountAmount,
+      discount_reason: updates.discount_reason,
+      adjustment_reason: updates.adjustment_reason,
+    });
+
+    return updatedInvoice;
+  },
+
+  checkChallanDeletionEligibility: async (
+    invoiceId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{
+    can_delete: boolean;
+    payment_count: number;
+    paid_amount: number;
+    explanation: string;
+    recommended_action: 'delete' | 'cancel';
+  }> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to inspect fee challans.');
+    }
+
+    const inv = await feeApi.getInvoiceById(invoiceId);
+    if (!inv) throw new Error('Invoice not found.');
+
+    const payments = (inv.payments || []).filter(p => !p.is_reversed);
+    const paidAmount = Number(inv.paid_amount || 0);
+    const hasPayments = payments.length > 0 || paidAmount > 0;
+
+    return {
+      can_delete: !hasPayments,
+      payment_count: payments.length,
+      paid_amount: paidAmount,
+      explanation: hasPayments
+        ? `Challan ${inv.invoice_no} has ${payments.length} active payment receipts totaling Rs. ${paidAmount}. Permanent deletion is blocked to protect financial ledger integrity and audit history. You may void/cancel the challan instead.`
+        : `Challan ${inv.invoice_no} has no recorded payments. It is safe to permanently delete.`,
+      recommended_action: hasPayments ? 'cancel' : 'delete',
+    };
+  },
+
+  deleteInvoice: async (
+    invoiceId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to delete fee challans.');
+    }
+
+    const eligibility = await feeApi.checkChallanDeletionEligibility(invoiceId, actor);
+    if (!eligibility.can_delete) {
+      throw new Error(`Permanent Deletion Blocked: ${eligibility.explanation}`);
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_delete_fee_challan', {
+          p_invoice_id: invoiceId,
+        });
+        if (!rpcErr && rpcData?.success) {
+          return rpcData;
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_delete_fee_challan')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes('Could not find the function') && !e.message.includes('admin_delete_fee_challan')) {
+          throw e;
+        }
+      }
+
+      await supabase.from('fee_invoice_items').delete().eq('invoice_id', invoiceId);
+      const { error: delErr } = await supabase.from('fee_invoices').delete().eq('id', invoiceId);
+      if (delErr) throw new Error(`Database error deleting invoice: ${delErr.message}`);
+
+      await logAudit(actor || {}, 'CHALLAN_PERMANENTLY_DELETED', 'fee_invoices', invoiceId, {});
+      return { success: true, message: 'Fee challan deleted successfully.' };
+    }
+
+    const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
+    const invIdx = invoices.findIndex(i => i.id === invoiceId);
+    if (invIdx === -1) throw new Error('Invoice not found.');
+    const inv = invoices[invIdx];
+
+    setStorage('invoices', invoices.filter(i => i.id !== invoiceId));
+    await logAudit(actor || {}, 'CHALLAN_PERMANENTLY_DELETED', 'fee_invoices', invoiceId, {
+      invoice_no: inv.invoice_no,
+    });
+
+    return {
+      success: true,
+      message: `Fee challan ${inv.invoice_no} has been permanently deleted.`,
+    };
+  },
+
+  cancelInvoice: async (
+    invoiceId: string,
+    reason?: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; invoice: FeeInvoice }> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to cancel fee challans.');
+    }
+
+    const cancelReason = reason || 'Cancelled by administrator';
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_cancel_fee_challan', {
+          p_invoice_id: invoiceId,
+          p_reason: cancelReason,
+        });
+        if (!rpcErr && rpcData?.success) {
+          const fresh = await feeApi.getInvoiceById(invoiceId);
+          if (fresh) return { success: true, message: rpcData.message, invoice: fresh };
+        }
+        if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('admin_cancel_fee_challan')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes('Could not find the function') && !e.message.includes('admin_cancel_fee_challan')) {
+          throw e;
+        }
+      }
+
+      const { data: updated, error: updErr } = await supabase
+        .from('fee_invoices')
+        .update({
+          status: 'Cancelled',
+          notes: `Cancelled: ${cancelReason}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', invoiceId)
+        .select()
+        .single();
+      if (updErr) throw new Error(`Database error cancelling invoice: ${updErr.message}`);
+
+      await logAudit(actor || {}, 'CHALLAN_CANCELLED', 'fee_invoices', invoiceId, {
+        reason: cancelReason,
+      });
+
+      const fresh = await feeApi.getInvoiceById(invoiceId);
+      return {
+        success: true,
+        message: `Fee challan ${fresh?.invoice_no || invoiceId} has been cancelled/voided.`,
+        invoice: fresh || updated,
+      };
+    }
+
+    const invoices = getStorage<FeeInvoice[]>('invoices', INITIAL_INVOICES);
+    const invIdx = invoices.findIndex(i => i.id === invoiceId);
+    if (invIdx === -1) throw new Error('Invoice not found.');
+    const inv = invoices[invIdx];
+
+    inv.status = 'Cancelled';
+    inv.notes = inv.notes ? `${inv.notes} | Cancelled: ${cancelReason}` : `Cancelled: ${cancelReason}`;
+    inv.updated_at = new Date().toISOString();
+    setStorage('invoices', [...invoices]);
+
+    await logAudit(actor || {}, 'CHALLAN_CANCELLED', 'fee_invoices', invoiceId, {
+      invoice_no: inv.invoice_no,
+      reason: cancelReason,
+    });
+
+    return {
+      success: true,
+      message: `Fee challan ${inv.invoice_no} has been cancelled/voided.`,
+      invoice: inv,
     };
   },
 };

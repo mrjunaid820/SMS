@@ -33,6 +33,14 @@ import {
   DollarSign,
   AlertCircle,
   FileText,
+  Edit2,
+  Trash2,
+  Percent,
+  Tag,
+  AlertTriangle,
+  Plus,
+  Ban,
+  Check,
 } from 'lucide-react';
 
 export const FeesAccountsPage: React.FC = () => {
@@ -58,6 +66,42 @@ export const FeesAccountsPage: React.FC = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<FeeInvoice | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<FeePayment | null>(null);
   const [reversalReason, setReversalReason] = useState('');
+
+  const isAdmin = user?.role === 'admin';
+
+  // Edit Challan states
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<FeeInvoice | null>(null);
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editDiscountType, setEditDiscountType] = useState<'fixed' | 'percentage' | 'waiver'>('fixed');
+  const [editDiscountValue, setEditDiscountValue] = useState<number | string>(0);
+  const [editDiscountReason, setEditDiscountReason] = useState('');
+  const [editAdjustmentReason, setEditAdjustmentReason] = useState('');
+  const [editItems, setEditItems] = useState<Array<{
+    id?: string;
+    description: string;
+    amount: number;
+    is_waived?: boolean;
+    original_amount?: number;
+  }>>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Delete / Void Challan states
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deletingInvoice, setDeletingInvoice] = useState<FeeInvoice | null>(null);
+  const [deletionEligibility, setDeletionEligibility] = useState<{
+    can_delete: boolean;
+    payment_count: number;
+    paid_amount: number;
+    explanation: string;
+    recommended_action: 'delete' | 'cancel';
+  } | null>(null);
+  const [isCheckingEligibility, setIsCheckingEligibility] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Form states
   const [generateForm, setGenerateForm] = useState({
@@ -224,6 +268,229 @@ export const FeesAccountsPage: React.FC = () => {
     exportToSafeCSV(rows, `Invoices_Register_${selectedSessionId}`);
   };
 
+  // Edit Challan Handlers
+  const handleOpenEditChallan = (invoice: FeeInvoice) => {
+    setEditingInvoice(invoice);
+    setEditDueDate(invoice.due_date || '');
+    setEditNotes(invoice.notes || '');
+    setEditDiscountType(invoice.discount_type || 'fixed');
+    setEditDiscountValue(
+      invoice.discount_type === 'percentage'
+        ? Number(invoice.discount_percentage || 0)
+        : Number(invoice.discount_amount || 0)
+    );
+    setEditDiscountReason(invoice.discount_reason || '');
+    setEditAdjustmentReason('');
+    setEditItems(
+      (invoice.items && invoice.items.length > 0
+        ? invoice.items
+        : [
+            {
+              id: generateUUID(),
+              description: 'Monthly Tuition Fee',
+              amount: Number(invoice.total_amount),
+              is_waived: false,
+              original_amount: Number(invoice.total_amount),
+            },
+          ]
+      ).map((it) => ({
+        id: it.id,
+        description: it.description,
+        amount: Number(it.amount),
+        is_waived: !!it.is_waived,
+        original_amount: it.original_amount !== undefined ? Number(it.original_amount) : Number(it.amount),
+      }))
+    );
+    setEditError(null);
+    setIsEditModalOpen(true);
+  };
+
+  const handleToggleItemWaive = (index: number) => {
+    setEditItems((prev) => {
+      const copy = [...prev];
+      const it = copy[index];
+      if (it.is_waived) {
+        copy[index] = {
+          ...it,
+          is_waived: false,
+          amount: it.original_amount !== undefined ? it.original_amount : it.amount,
+        };
+      } else {
+        copy[index] = {
+          ...it,
+          is_waived: true,
+          original_amount: it.amount,
+          amount: 0,
+        };
+      }
+      return copy;
+    });
+  };
+
+  const handleAddItem = () => {
+    setEditItems((prev) => [
+      ...prev,
+      {
+        id: generateUUID(),
+        description: '',
+        amount: 0,
+        is_waived: false,
+        original_amount: 0,
+      },
+    ]);
+  };
+
+  const handleRemoveItem = (index: number) => {
+    if (editItems.length <= 1) return;
+    setEditItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleItemChange = (index: number, field: 'description' | 'amount', value: any) => {
+    setEditItems((prev) => {
+      const copy = [...prev];
+      const val = field === 'amount' ? Math.max(0, Number(value) || 0) : value;
+      copy[index] = {
+        ...copy[index],
+        [field]: val,
+        ...(field === 'amount' ? { original_amount: val, is_waived: false } : {}),
+      };
+      return copy;
+    });
+  };
+
+  // Calculations for Edit Challan
+  const computedTotal = editItems.reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+  let computedDiscount = 0;
+  if (editDiscountType === 'percentage') {
+    const pct = Math.min(100, Math.max(0, Number(editDiscountValue) || 0));
+    computedDiscount = Math.round((pct / 100) * computedTotal * 100) / 100;
+  } else if (editDiscountType === 'waiver') {
+    computedDiscount = computedTotal;
+  } else {
+    computedDiscount = Math.min(computedTotal, Math.max(0, Number(editDiscountValue) || 0));
+  }
+  const computedNet = Math.max(0, computedTotal - computedDiscount);
+  const alreadyPaid = Number(editingInvoice?.paid_amount || 0);
+  const remainingBalance = Math.max(0, computedNet - alreadyPaid);
+  const isUnderpaidReduction = computedNet < alreadyPaid;
+
+  const handleSaveEditChallan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInvoice) return;
+    setEditError(null);
+
+    if (isUnderpaidReduction) {
+      setEditError(
+        `Cannot reduce payable amount (${formatCurrency(computedNet)}) below already paid amount (${formatCurrency(alreadyPaid)}). Please reverse excess payments before adjusting challan.`
+      );
+      return;
+    }
+
+    if (computedDiscount > 0 && !editDiscountReason.trim()) {
+      setEditError('Please select or enter a reason for applying this discount / waiver.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const updated = await feeApi.updateInvoice(
+        editingInvoice.id,
+        {
+          due_date: editDueDate,
+          notes: editNotes,
+          discount_type: editDiscountType,
+          discount_percentage: editDiscountType === 'percentage' ? Number(editDiscountValue) : 0,
+          discount_amount: computedDiscount,
+          discount_reason: editDiscountReason,
+          adjustment_reason: editAdjustmentReason || 'Administrative adjustment',
+          items: editItems,
+        },
+        {
+          id: user?.id,
+          name: user?.full_name,
+          role: user?.role,
+        }
+      );
+
+      setIsEditModalOpen(false);
+      setEditingInvoice(null);
+      await loadData();
+      alert(`Challan ${updated.invoice_no} updated successfully! Final payable: ${formatCurrency(updated.net_amount)}`);
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update challan.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // Delete Challan Handlers
+  const handleOpenDeleteChallan = async (invoice: FeeInvoice) => {
+    setDeletingInvoice(invoice);
+    setDeletionEligibility(null);
+    setDeleteError(null);
+    setCancelReason('');
+    setIsDeleteModalOpen(true);
+    setIsCheckingEligibility(true);
+    try {
+      const elig = await feeApi.checkChallanDeletionEligibility(invoice.id, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setDeletionEligibility(elig);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to check challan dependencies.');
+    } finally {
+      setIsCheckingEligibility(false);
+    }
+  };
+
+  const handleExecuteDeleteChallan = async () => {
+    if (!deletingInvoice) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await feeApi.deleteInvoice(deletingInvoice.id, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setIsDeleteModalOpen(false);
+      setDeletingInvoice(null);
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to delete challan.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleExecuteCancelChallan = async () => {
+    if (!deletingInvoice) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await feeApi.cancelInvoice(
+        deletingInvoice.id,
+        cancelReason || 'Cancelled by administrator',
+        {
+          id: user?.id,
+          name: user?.full_name,
+          role: user?.role,
+        }
+      );
+      setIsDeleteModalOpen(false);
+      setDeletingInvoice(null);
+      await loadData();
+      alert(res.message);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Failed to cancel challan.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Invoice Table Columns
   const invoiceColumns: Column<FeeInvoice>[] = [
     {
@@ -318,6 +585,24 @@ export const FeesAccountsPage: React.FC = () => {
               >
                 Receive Fee
               </Button>
+            )}
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => handleOpenEditChallan(row)}
+                  className="p-1.5 text-slate-500 hover:text-brand-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Edit Fee Challan (Particulars, Discounts & Waivers)"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleOpenDeleteChallan(row)}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                  title="Delete or Void Fee Challan"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
             )}
             <button
               onClick={() => {
@@ -793,6 +1078,463 @@ export const FeesAccountsPage: React.FC = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal: Edit Fee Challan (Particulars, Discounts & Waivers) */}
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Edit Fee Challan - ${editingInvoice?.invoice_no}`}
+        size="lg"
+      >
+        {editingInvoice && (
+          <form onSubmit={handleSaveEditChallan} className="space-y-4">
+            {/* Student info banner */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-wrap justify-between items-center text-xs gap-2">
+              <div>
+                <span className="text-slate-500">Student:</span>{' '}
+                <span className="font-bold text-slate-900 dark:text-slate-100">
+                  {editingInvoice.enrollment?.student?.full_name}
+                </span>{' '}
+                <span className="text-slate-400">
+                  (Adm #{editingInvoice.enrollment?.student?.admission_no})
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500">Class:</span>{' '}
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {editingInvoice.enrollment?.section?.class?.name} - {editingInvoice.enrollment?.section?.name}
+                </span>{' '}
+                <span className="text-slate-400">(Roll #{editingInvoice.enrollment?.roll_no})</span>
+              </div>
+              <div>
+                <span className="text-slate-500">Billing Month:</span>{' '}
+                <span className="font-mono font-semibold">{editingInvoice.billing_month}</span>
+              </div>
+            </div>
+
+            {/* Due date & notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Due Date"
+                type="date"
+                required
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+              />
+              <Input
+                label="Payment Notes / Remarks (Optional)"
+                placeholder="e.g. Approved concession, 1st installment"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+              />
+            </div>
+
+            {/* Fee Items section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Fee Items & Particulars
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<Plus className="w-3.5 h-3.5" />}
+                  onClick={handleAddItem}
+                  className="text-xs py-1"
+                >
+                  Add Fee Item
+                </Button>
+              </div>
+
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+                {editItems.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className="p-2.5 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-start sm:items-center gap-2 text-xs"
+                  >
+                    <div className="flex-1 w-full">
+                      <input
+                        type="text"
+                        placeholder="Particular description (e.g. Tuition Fee)"
+                        required
+                        value={item.description}
+                        onChange={(e) => handleItemChange(idx, 'description', e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <div className="w-full sm:w-32 flex items-center gap-1">
+                      <span className="text-slate-400 font-mono">Rs.</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="10"
+                        required
+                        disabled={item.is_waived}
+                        value={item.amount}
+                        onChange={(e) => handleItemChange(idx, 'amount', e.target.value)}
+                        className={`w-full px-2.5 py-1.5 font-mono text-right bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 ${
+                          item.is_waived ? 'opacity-50 line-through' : ''
+                        }`}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleItemWaive(idx)}
+                        className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                          item.is_waived
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                        title={item.is_waived ? 'Restore item fee' : 'Waive this item (make FREE)'}
+                      >
+                        {item.is_waived ? 'Waived (FREE)' : 'Waive Item'}
+                      </button>
+                      {editItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(idx)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                          title="Remove Item"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Discounts, Concessions & Waivers (Requirement 2) */}
+            <div className="p-3.5 bg-brand-50/50 dark:bg-brand-950/20 border border-brand-200/60 dark:border-brand-900/40 rounded-xl space-y-3">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  Discount, Concession & Fee Waiver Options
+                </span>
+              </div>
+
+              {/* Discount type toggle buttons */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditDiscountType('fixed');
+                    if (editDiscountType === 'waiver') setEditDiscountValue(0);
+                  }}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-medium border transition-all ${
+                    editDiscountType === 'fixed'
+                      ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Fixed Discount (Rs.)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditDiscountType('percentage');
+                    if (editDiscountType === 'waiver') setEditDiscountValue(10);
+                  }}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-medium border transition-all ${
+                    editDiscountType === 'percentage'
+                      ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Percentage (%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditDiscountType('waiver');
+                    setEditDiscountValue(computedTotal);
+                  }}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-medium border transition-all ${
+                    editDiscountType === 'waiver'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Full Waiver (100% Free)
+                </button>
+              </div>
+
+              {/* Discount inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {editDiscountType === 'fixed' && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Fixed Discount Amount (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={computedTotal}
+                      step="50"
+                      value={editDiscountValue}
+                      onChange={(e) => setEditDiscountValue(Math.max(0, Number(e.target.value) || 0))}
+                      placeholder="e.g. 500"
+                      className="w-full px-2.5 py-1.5 font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                )}
+                {editDiscountType === 'percentage' && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Discount Percentage (%)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={editDiscountValue}
+                        onChange={(e) =>
+                          setEditDiscountValue(Math.min(100, Math.max(0, Number(e.target.value) || 0)))
+                        }
+                        placeholder="e.g. 10"
+                        className="w-full px-2.5 py-1.5 font-mono bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <span className="text-slate-400 font-bold">%</span>
+                    </div>
+                  </div>
+                )}
+                {editDiscountType === 'waiver' && (
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Full fee waiver applied. Final payable will be Rs. 0.</span>
+                  </div>
+                )}
+
+                {/* Discount reason */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Discount / Waiver Reason {computedDiscount > 0 && <span className="text-rose-500">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    list="discount-reasons"
+                    placeholder="e.g. Merit Scholarship, Need-based Assistance"
+                    value={editDiscountReason}
+                    onChange={(e) => setEditDiscountReason(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                  <datalist id="discount-reasons">
+                    <option value="Merit Scholarship" />
+                    <option value="Need-Based Financial Assistance" />
+                    <option value="Staff / Sibling Concession" />
+                    <option value="Principal Discretionary Concession" />
+                    <option value="Special Fee Waiver" />
+                  </datalist>
+                </div>
+              </div>
+            </div>
+
+            {/* Audit Adjustment Reason */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Administrative Adjustment Reason (for Audit Trail)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Corrected fee head per principal approval; applied mid-session waiver"
+                value={editAdjustmentReason}
+                onChange={(e) => setEditAdjustmentReason(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+
+            {/* Calculated Breakdown Summary Box (Requirement 2 Table) */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-100 mb-2">
+                Challan Financial Breakdown & Calculations
+              </div>
+              <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    <tr className="bg-white dark:bg-slate-800">
+                      <td className="p-2 text-slate-600 dark:text-slate-300">Original Fee Total</td>
+                      <td className="p-2 text-right font-mono font-medium">{formatCurrency(computedTotal)}</td>
+                    </tr>
+                    <tr className="bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-400">
+                      <td className="p-2">
+                        Discount / Concession
+                        {editDiscountReason && (
+                          <span className="ml-1.5 text-[11px] font-normal text-emerald-600">
+                            ({editDiscountReason})
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2 text-right font-mono font-bold">-{formatCurrency(computedDiscount)}</td>
+                    </tr>
+                    <tr className="bg-slate-100 dark:bg-slate-900 font-bold">
+                      <td className="p-2 text-slate-900 dark:text-slate-100">Final Payable Amount</td>
+                      <td className="p-2 text-right font-mono text-brand-600 dark:text-brand-400">
+                        {formatCurrency(computedNet)}
+                      </td>
+                    </tr>
+                    <tr className="bg-white dark:bg-slate-800">
+                      <td className="p-2 text-slate-600 dark:text-slate-300">Amount Already Paid</td>
+                      <td className="p-2 text-right font-mono font-medium text-emerald-600">
+                        {formatCurrency(alreadyPaid)}
+                      </td>
+                    </tr>
+                    <tr className="bg-rose-50/80 dark:bg-rose-950/30 font-bold text-rose-800 dark:text-rose-300">
+                      <td className="p-2">Remaining Outstanding Balance</td>
+                      <td className="p-2 text-right font-mono">{formatCurrency(remainingBalance)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Error banner */}
+            {editError && (
+              <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-rose-700 dark:text-rose-300 text-xs font-medium">
+                {editError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <Button variant="outline" type="button" onClick={() => setIsEditModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" isLoading={isSavingEdit} leftIcon={<Check className="w-4 h-4" />}>
+                Save Challan Changes
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Modal: Delete or Void Fee Challan (Requirement 3) */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title={`Delete / Cancel Fee Challan - ${deletingInvoice?.invoice_no}`}
+        size="md"
+      >
+        <div className="space-y-4">
+          {isCheckingEligibility ? (
+            <div className="py-8 flex flex-col items-center justify-center space-y-3">
+              <div className="w-8 h-8 rounded-full border-2 border-brand-200 border-t-brand-600 animate-spin" />
+              <p className="text-xs text-slate-500">Checking payment dependencies & receipts...</p>
+            </div>
+          ) : (
+            deletingInvoice && (
+              <div className="space-y-4">
+                {/* Challan Summary Card */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs space-y-1">
+                  <div>
+                    <b>Challan #:</b> <span className="font-mono">{deletingInvoice.invoice_no}</span>
+                  </div>
+                  <div>
+                    <b>Student:</b> {deletingInvoice.enrollment?.student?.full_name} (
+                    {deletingInvoice.enrollment?.student?.admission_no})
+                  </div>
+                  <div>
+                    <b>Month:</b> {deletingInvoice.billing_month}
+                  </div>
+                  <div>
+                    <b>Invoiced:</b> {formatCurrency(deletingInvoice.net_amount)} | <b>Paid:</b>{' '}
+                    {formatCurrency(deletingInvoice.paid_amount)}
+                  </div>
+                </div>
+
+                {/* Safe deletion vs Payment Block */}
+                {deletionEligibility?.can_delete ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl flex items-start gap-2.5">
+                      <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <div className="font-bold text-rose-900 dark:text-rose-200">
+                          Confirm Permanent Challan Deletion
+                        </div>
+                        <div className="text-rose-800 dark:text-rose-300">
+                          {deletionEligibility.explanation}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      This action is permanent and will remove this fee challan and its line items from the database.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <div className="font-bold text-amber-900 dark:text-amber-200">
+                          Permanent Deletion Blocked
+                        </div>
+                        <div className="text-amber-800 dark:text-amber-300">
+                          {deletionEligibility?.explanation}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl text-xs space-y-2">
+                      <div className="font-semibold text-blue-900 dark:text-blue-200">
+                        Recommended Action: Void / Cancel Challan
+                      </div>
+                      <div className="text-blue-800 dark:text-blue-300">
+                        Cancelling will mark the challan as <b>Cancelled</b>, preventing further fee collection while preserving all existing payment receipts for financial accounting compliance.
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Cancellation Reason (Required):
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Issued in error, billing cycle corrected, student withdrawn"
+                          value={cancelReason}
+                          onChange={(e) => setCancelReason(e.target.value)}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {deleteError && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-medium">
+                    {deleteError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  {deletionEligibility?.can_delete ? (
+                    <Button
+                      variant="danger"
+                      isLoading={isDeleting}
+                      onClick={handleExecuteDeleteChallan}
+                      leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                    >
+                      Permanently Delete Challan
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      isLoading={isDeleting}
+                      onClick={handleExecuteCancelChallan}
+                      leftIcon={<Ban className="w-3.5 h-3.5" />}
+                    >
+                      Void / Cancel Challan
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          )}
+        </div>
       </Modal>
 
       {/* Reversal Confirmation Dialog */}
