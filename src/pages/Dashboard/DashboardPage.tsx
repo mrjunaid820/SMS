@@ -26,8 +26,6 @@ import {
   CalendarDays,
   MapPin,
   Clock,
-  ArrowUpRight,
-  ArrowDownRight,
   Trophy,
   Wallet,
   UserPlus,
@@ -348,23 +346,20 @@ export const DashboardPage: React.FC = () => {
       {/* 2. SIX STATISTIC CARDS (Phase 6 Visual Reference)              */}
       {/* ------------------------------------------------------------- */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-        {/* Card 1: Total Students */}
+        {/* Card 1: Active Students */}
         <div
           onClick={() => navigate('/students')}
           className="bg-[#edf5fe] dark:bg-slate-850/80 rounded-2xl border border-blue-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs">
-              <Users className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs">
+              <Users className="w-5 h-5" />
             </div>
-            <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-0.5">
-              <ArrowUpRight className="w-3 h-3" /> 5%
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Total Students</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Students</p>
             <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.totalActiveStudents > 0 ? stats.totalActiveStudents.toLocaleString() : '1,250'}
+              {stats.totalActiveStudents !== undefined ? stats.totalActiveStudents.toLocaleString() : 0}
             </h3>
           </div>
         </div>
@@ -374,18 +369,15 @@ export const DashboardPage: React.FC = () => {
           onClick={() => navigate('/teachers')}
           className="bg-[#edfbf4] dark:bg-slate-850/80 rounded-2xl border border-emerald-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-emerald-500 text-white shadow-xs">
-              <GraduationCap className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500 text-white shadow-xs">
+              <GraduationCap className="w-5 h-5" />
             </div>
-            <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-0.5">
-              <ArrowUpRight className="w-3 h-3" /> 2%
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Total Teachers</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Teachers</p>
             <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.activeTeachers > 0 ? stats.activeTeachers.toLocaleString() : '85'}
+              {stats.activeTeachers !== undefined ? stats.activeTeachers.toLocaleString() : 0}
             </h3>
           </div>
         </div>
@@ -395,18 +387,15 @@ export const DashboardPage: React.FC = () => {
           onClick={() => navigate('/attendance')}
           className="bg-[#f5f1fe] dark:bg-slate-850/80 rounded-2xl border border-purple-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-purple-600 text-white shadow-xs">
-              <CalendarCheck className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-xs">
+              <CalendarCheck className="w-5 h-5" />
             </div>
-            <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-0.5">
-              <ArrowUpRight className="w-3 h-3" /> 1%
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Today's Attendance</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Today's Attendance</p>
             <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {presentPct > 0 ? `${presentPct}%` : '94%'}
+              {presentPct > 0 ? `${presentPct}%` : '0%'}
             </h3>
           </div>
         </div>
@@ -416,18 +405,15 @@ export const DashboardPage: React.FC = () => {
           onClick={() => navigate('/fees-accounts')}
           className="bg-[#fff7ea] dark:bg-slate-850/80 rounded-2xl border border-amber-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs">
-              <Wallet className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-xs">
+              <Wallet className="w-5 h-5" />
             </div>
-            <span className="text-[11px] font-semibold text-rose-500 flex items-center gap-0.5">
-              <ArrowDownRight className="w-3 h-3" /> 3%
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Pending Fees</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending Fees</p>
             <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
-              {stats.financial ? formatCurrency(stats.financial.totalOutstanding) : 'Rs. 425,000'}
+              {stats.financial ? formatCurrency(stats.financial.totalOutstanding) : 'Rs. 0'}
             </h3>
           </div>
         </div>
@@ -437,20 +423,17 @@ export const DashboardPage: React.FC = () => {
           onClick={() => navigate('/examinations')}
           className="bg-[#e6f8f9] dark:bg-slate-850/80 rounded-2xl border border-cyan-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-cyan-600 text-white shadow-xs">
-              <Trophy className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-cyan-600 text-white shadow-xs">
+              <Trophy className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-bold text-cyan-700 bg-cyan-100 px-1.5 py-0.5 rounded">
-              Scheduled
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Upcoming Exams</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Upcoming Exams</p>
             <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
               {stats.upcomingExams && stats.upcomingExams.length > 0
                 ? formatDate(stats.upcomingExams[0].start_date)
-                : 'Nov 15, 2025'}
+                : 'None Scheduled'}
             </h3>
           </div>
         </div>
@@ -460,18 +443,15 @@ export const DashboardPage: React.FC = () => {
           onClick={() => navigate('/events-announcements')}
           className="bg-[#fff0f4] dark:bg-slate-850/80 rounded-2xl border border-rose-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="p-2 rounded-xl bg-rose-500 text-white shadow-xs">
-              <Megaphone className="w-4 h-4" />
+          <div className="flex items-center mb-3">
+            <div className="p-2.5 rounded-xl bg-rose-500 text-white shadow-xs">
+              <Megaphone className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
-              Active
-            </span>
           </div>
           <div>
-            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Latest Notices</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Latest Notices</p>
             <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.recentAnnouncements?.length || 3} New
+              {stats.recentAnnouncements?.length !== undefined ? `${stats.recentAnnouncements.length} New` : '0 New'}
             </h3>
           </div>
         </div>

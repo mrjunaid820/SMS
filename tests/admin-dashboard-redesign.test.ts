@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { dashboardApi, attendanceApi } from '../src/services/api';
+import { dashboardApi, attendanceApi, studentApi } from '../src/services/api';
 import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS } from '../src/config/constants';
-import { INITIAL_INVOICES, INITIAL_PAYMENTS, INITIAL_ATTENDANCE } from '../src/services/mockData';
+import { INITIAL_INVOICES, INITIAL_PAYMENTS, INITIAL_ATTENDANCE, INITIAL_STUDENTS } from '../src/services/mockData';
 
 describe('Admin Dashboard UI/UX Redesign & Scoping Verification', () => {
   beforeEach(() => {
@@ -9,6 +9,7 @@ describe('Admin Dashboard UI/UX Redesign & Scoping Verification', () => {
     localStorage.setItem('sms_invoices', JSON.stringify(INITIAL_INVOICES));
     localStorage.setItem('sms_payments', JSON.stringify(INITIAL_PAYMENTS));
     localStorage.setItem('sms_attendance', JSON.stringify(INITIAL_ATTENDANCE));
+    localStorage.setItem('sms_students', JSON.stringify(INITIAL_STUDENTS));
   });
 
   it('1. verifies all 16 MAIN_NAV_ITEMS remain intact for routing and testing compatibility', () => {
@@ -61,5 +62,56 @@ describe('Admin Dashboard UI/UX Redesign & Scoping Verification', () => {
     expect(Array.isArray(stats.recentAnnouncements)).toBe(true);
     expect(Array.isArray(stats.upcomingEvents)).toBe(true);
     expect(Array.isArray(stats.recentActivity)).toBe(true);
+  });
+
+  it('6. updates Active Students count dynamically when students are added, archived, or restored', async () => {
+    const adminActor = { id: 'admin-1', name: 'Admin', role: 'admin' };
+    const initialStats = await dashboardApi.getLiveStatistics();
+    const initialActiveCount = initialStats.totalActiveStudents;
+
+    // 1. Archive student #1
+    const studentToArchive = INITIAL_STUDENTS[0];
+    await studentApi.archiveStudent(studentToArchive.id, 'Graduated from high school', adminActor);
+
+    const afterArchiveStats = await dashboardApi.getLiveStatistics();
+    expect(afterArchiveStats.totalActiveStudents).toBe(initialActiveCount - 1);
+
+    // 2. Restore student #1
+    await studentApi.restoreStudent(studentToArchive.id, adminActor);
+
+    const afterRestoreStats = await dashboardApi.getLiveStatistics();
+    expect(afterRestoreStats.totalActiveStudents).toBe(initialActiveCount);
+
+    // 3. Add new active student
+    await studentApi.createStudentWithEnrollment(
+      {
+        full_name: 'Test Active Student',
+        date_of_birth: '2011-01-01',
+        gender: 'Male',
+        admission_date: '2026-10-31',
+        guardian_name: 'Test Guardian',
+        guardian_relation: 'Father',
+        guardian_phone: '03001234567',
+        address: 'Lahore',
+      },
+      'b0000000-0000-0000-0000-000000000002',
+      'd0000000-0000-0000-0000-000000000001',
+      adminActor
+    );
+
+    const afterAddStats = await dashboardApi.getLiveStatistics();
+    expect(afterAddStats.totalActiveStudents).toBe(initialActiveCount + 1);
+  });
+
+  it('7. returns 0 for Active Students when no active student records exist', async () => {
+    const adminActor = { id: 'admin-1', name: 'Admin', role: 'admin' };
+    // Deactivate all students
+    const allStudents = await studentApi.getStudents(true);
+    for (const s of allStudents) {
+      await studentApi.archiveStudent(s.id, 'Deactivated for test', adminActor);
+    }
+
+    const stats = await dashboardApi.getLiveStatistics();
+    expect(stats.totalActiveStudents).toBe(0);
   });
 });
