@@ -1145,7 +1145,7 @@ export const StudentDossierView: React.FC<StudentDossierViewProps> = ({
                 {filteredDiaries.map((diary) => (
                   <div
                     key={diary.id}
-                    className="p-4 bg-slate-50/70 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3 transition-colors"
+                    className="p-4 bg-slate-50/70 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3 transition-colors"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800/80 pb-2.5">
                       <div className="flex items-center gap-2">

@@ -194,7 +194,7 @@ export const DashboardPage: React.FC = () => {
                         </span>
                         <span className="text-xs font-mono text-slate-400">({a.subject?.code})</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         {a.section?.class?.name} — Section {a.section?.name}
                       </p>
                     </div>
@@ -247,7 +247,7 @@ export const DashboardPage: React.FC = () => {
                       <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
                         {exam.name}
                       </h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                         {formatDate(exam.start_date)} — {formatDate(exam.end_date)}
                       </p>
                     </div>
@@ -336,7 +336,7 @@ export const DashboardPage: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       {/* 1. WELCOME SECTION (Phase 5 Visual Reference)                  */}
       {/* ------------------------------------------------------------- */}
-      <div className="relative rounded-2xl overflow-hidden border border-blue-100/80 dark:border-slate-800 bg-gradient-to-r from-[#eef5fc] via-[#f4f8fe] to-[#e8f1fc] dark:from-slate-900 dark:via-slate-850 dark:to-slate-900 p-5 sm:p-6 shadow-xs">
+      <div className="relative rounded-2xl overflow-hidden border border-blue-100/80 dark:border-slate-800 bg-gradient-to-r from-[#eef5fc] via-[#f4f8fe] to-[#e8f1fc] dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 p-5 sm:p-6 shadow-xs">
         {/* Campus Architecture Illustration Backdrop */}
         <div className="absolute right-0 top-0 bottom-0 w-full sm:w-2/3 max-w-[540px] opacity-75 dark:opacity-20 pointer-events-none">
           <SchoolCampusIllustration className="w-full h-full" />
@@ -352,7 +352,7 @@ export const DashboardPage: React.FC = () => {
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
                 Welcome Back, Admin!
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-300 mt-0.5">
                 Here's what's happening at {settings.school_name || 'Islamia Public High School'} today.
               </p>
             </div>
@@ -367,7 +367,7 @@ export const DashboardPage: React.FC = () => {
               <p className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight">
                 {formattedTodayDate}
               </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+              <p className="text-[11px] text-slate-500 dark:text-slate-300 font-medium mt-0.5">
                 {currentSession ? `Academic Session: ${currentSession.name}` : 'Academic Session: 2025 - 2026'}
               </p>
             </div>
@@ -382,19 +382,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 1: Active Students */}
         <div
           onClick={() => navigate('/students')}
-          className="bg-[#edf5fe] dark:bg-slate-850/80 rounded-2xl border border-blue-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#edf5fe] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-blue-950/40 dark:to-slate-900 rounded-2xl border border-blue-100/90 dark:border-blue-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-blue-200 dark:hover:border-blue-700/60 dark:hover:from-blue-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs dark:bg-blue-600 dark:shadow-blue-950">
               <Users className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Students</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-blue-200/90 tracking-tight">Active Students</p>
             {isLoading && !stats ? (
-              <div className="h-6 w-16 bg-blue-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-16 bg-blue-200/60 dark:bg-blue-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mt-0.5 leading-tight tracking-tight">
                 {safeStats.totalActiveStudents !== undefined ? safeStats.totalActiveStudents.toLocaleString() : 0}
               </h3>
             )}
@@ -404,19 +404,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 2: Total Teachers */}
         <div
           onClick={() => navigate('/teachers')}
-          className="bg-[#edfbf4] dark:bg-slate-850/80 rounded-2xl border border-emerald-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#edfbf4] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-emerald-950/40 dark:to-slate-900 rounded-2xl border border-emerald-100/90 dark:border-emerald-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-emerald-200 dark:hover:border-emerald-700/60 dark:hover:from-emerald-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-emerald-500 text-white shadow-xs dark:bg-emerald-600 dark:shadow-emerald-950">
               <GraduationCap className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Teachers</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-emerald-200/90 tracking-tight">Total Teachers</p>
             {isLoading && !stats ? (
-              <div className="h-6 w-14 bg-emerald-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-14 bg-emerald-200/60 dark:bg-emerald-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mt-0.5 leading-tight tracking-tight">
                 {safeStats.activeTeachers !== undefined ? safeStats.activeTeachers.toLocaleString() : 0}
               </h3>
             )}
@@ -426,19 +426,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 3: Today's Attendance */}
         <div
           onClick={() => navigate('/attendance')}
-          className="bg-[#f5f1fe] dark:bg-slate-850/80 rounded-2xl border border-purple-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#f5f1fe] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-purple-950/40 dark:to-slate-900 rounded-2xl border border-purple-100/90 dark:border-purple-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-purple-200 dark:hover:border-purple-700/60 dark:hover:from-purple-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-xs dark:bg-purple-600 dark:shadow-purple-950">
               <CalendarCheck className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Today's Attendance</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-purple-200/90 tracking-tight">Today's Attendance</p>
             {isLoading && !stats && !attendanceSummary ? (
-              <div className="h-6 w-14 bg-purple-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-14 bg-purple-200/60 dark:bg-purple-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mt-0.5 leading-tight tracking-tight">
                 {presentPct > 0 ? `${presentPct}%` : '0%'}
               </h3>
             )}
@@ -448,19 +448,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 4: Pending Fees */}
         <div
           onClick={() => navigate('/fees-accounts')}
-          className="bg-[#fff7ea] dark:bg-slate-850/80 rounded-2xl border border-amber-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#fff7ea] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-amber-950/40 dark:to-slate-900 rounded-2xl border border-amber-100/90 dark:border-amber-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-amber-200 dark:hover:border-amber-700/60 dark:hover:from-amber-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-xs dark:bg-amber-600 dark:shadow-amber-950">
               <Wallet className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending Fees</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-amber-200/90 tracking-tight">Pending Fees</p>
             {isLoading && !stats ? (
-              <div className="h-6 w-20 bg-amber-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-20 bg-amber-200/60 dark:bg-amber-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-amber-100 mt-0.5 leading-tight truncate tracking-tight">
                 {safeStats.financial ? formatCurrency(safeStats.financial.totalOutstanding) : 'Rs. 0'}
               </h3>
             )}
@@ -470,19 +470,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 5: Upcoming Exams */}
         <div
           onClick={() => navigate('/examinations')}
-          className="bg-[#e6f8f9] dark:bg-slate-850/80 rounded-2xl border border-cyan-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#e6f8f9] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-cyan-950/40 dark:to-slate-900 rounded-2xl border border-cyan-100/90 dark:border-cyan-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-cyan-200 dark:hover:border-cyan-700/60 dark:hover:from-cyan-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-cyan-600 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-cyan-600 text-white shadow-xs dark:bg-cyan-600 dark:shadow-cyan-950">
               <Trophy className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Upcoming Exams</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-cyan-200/90 tracking-tight">Upcoming Exams</p>
             {isLoading && !stats ? (
-              <div className="h-6 w-20 bg-cyan-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-20 bg-cyan-200/60 dark:bg-cyan-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white mt-0.5 leading-tight truncate tracking-tight">
                 {safeStats.upcomingExams && safeStats.upcomingExams.length > 0
                   ? formatDate(safeStats.upcomingExams[0].start_date)
                   : 'None Scheduled'}
@@ -494,19 +494,19 @@ export const DashboardPage: React.FC = () => {
         {/* Card 6: Latest Notices */}
         <div
           onClick={() => navigate('/events-announcements')}
-          className="bg-[#fff0f4] dark:bg-slate-850/80 rounded-2xl border border-rose-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
+          className="bg-[#fff0f4] dark:bg-slate-900/95 dark:bg-gradient-to-br dark:from-rose-950/40 dark:to-slate-900 rounded-2xl border border-rose-100/90 dark:border-rose-900/40 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 hover:border-rose-200 dark:hover:border-rose-700/60 dark:hover:from-rose-950/60 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
-            <div className="p-2.5 rounded-xl bg-rose-500 text-white shadow-xs">
+            <div className="p-2.5 rounded-xl bg-rose-500 text-white shadow-xs dark:bg-rose-600 dark:shadow-rose-950">
               <Megaphone className="w-5 h-5" />
             </div>
           </div>
           <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Latest Notices</p>
+            <p className="text-xs font-semibold text-slate-600 dark:text-rose-200/90 tracking-tight">Latest Notices</p>
             {isLoading && !stats ? (
-              <div className="h-6 w-14 bg-rose-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+              <div className="h-6 w-14 bg-rose-200/60 dark:bg-rose-900/40 rounded animate-pulse mt-1" />
             ) : (
-              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mt-0.5 leading-tight tracking-tight">
                 {safeStats.recentAnnouncements?.length !== undefined ? `${safeStats.recentAnnouncements.length} New` : '0 New'}
               </h3>
             )}
@@ -570,7 +570,7 @@ export const DashboardPage: React.FC = () => {
                   <span className="text-2xl font-bold text-slate-900 dark:text-white leading-none">
                     {presentPct > 0 ? `${presentPct}%` : '94%'}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-medium mt-0.5">Present</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-300 font-medium mt-0.5">Present</span>
                 </div>
               </div>
             )}
@@ -580,7 +580,7 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                  <span className="text-slate-600 dark:text-slate-300 font-medium">Present</span>
+                  <span className="text-slate-600 dark:text-slate-200 font-medium">Present</span>
                 </div>
                 <span className="font-bold text-slate-900 dark:text-white">
                   {presentPct > 0 ? `${presentPct}%` : '94%'}
@@ -590,7 +590,7 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                  <span className="text-slate-600 dark:text-slate-300 font-medium">Absent</span>
+                  <span className="text-slate-600 dark:text-slate-200 font-medium">Absent</span>
                 </div>
                 <span className="font-bold text-slate-900 dark:text-white">
                   {absentPct > 0 ? `${absentPct}%` : '4%'}
@@ -600,7 +600,7 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
-                  <span className="text-slate-600 dark:text-slate-300 font-medium">Late</span>
+                  <span className="text-slate-600 dark:text-slate-200 font-medium">Late</span>
                 </div>
                 <span className="font-bold text-slate-900 dark:text-white">
                   {latePct > 0 ? `${latePct}%` : '2%'}
@@ -709,7 +709,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="pt-2 text-center border-t border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] text-slate-400">Click any action to open immediate management form</span>
+            <span className="text-[11px] text-slate-400 dark:text-slate-400 font-medium">Click any action to open immediate management form</span>
           </div>
         </div>
 
@@ -765,11 +765,11 @@ export const DashboardPage: React.FC = () => {
                     className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group"
                   >
                     {/* Date Badge */}
-                    <div className="w-12 h-13 rounded-xl bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center text-center shrink-0 border border-slate-200/60 dark:border-slate-700 group-hover:border-blue-300">
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-none">
+                    <div className="w-12 h-13 rounded-xl bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center text-center shrink-0 border border-slate-200/60 dark:border-slate-700 group-hover:border-blue-300 dark:group-hover:border-blue-500/50">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-300 uppercase leading-none">
                         {monthStr}
                       </span>
-                      <span className="text-base font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
+                      <span className="text-base font-bold text-slate-900 dark:text-white leading-none mt-1">
                         {dayStr}
                       </span>
                     </div>
@@ -778,11 +778,11 @@ export const DashboardPage: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                        <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
                           {ev.title}
                         </h4>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 pl-4">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-300 truncate mt-0.5 pl-4">
                         {ev.target_audience || 'All Classes'} • {ev.start_time || '09:00 AM'}
                         {ev.venue ? ` • ${ev.venue}` : ''}
                       </p>
@@ -794,7 +794,7 @@ export const DashboardPage: React.FC = () => {
           )}
 
           <div className="pt-2 text-center border-t border-slate-100 dark:border-slate-800 relative z-10">
-            <span className="text-[11px] text-slate-400">Institutional Calendar & Announcements</span>
+            <span className="text-[11px] text-slate-400 dark:text-slate-400 font-medium">Institutional Calendar & Announcements</span>
           </div>
         </div>
       </div>
@@ -833,13 +833,13 @@ export const DashboardPage: React.FC = () => {
             </div>
           ) : safeStats.recentActivity && safeStats.recentActivity.length > 0 ? (
             safeStats.recentActivity.slice(0, 5).map((log: any) => {
-              let badgeColor = 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300';
+              let badgeColor = 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-200 dark:border dark:border-blue-800/60';
               if (log.action.includes('PAYMENT') || log.action.includes('FEE')) {
-                badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
+                badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-200 dark:border dark:border-emerald-800/60';
               } else if (log.action.includes('ATTENDANCE')) {
-                badgeColor = 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300';
+                badgeColor = 'bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-200 dark:border dark:border-purple-800/60';
               } else if (log.action.includes('ANNOUNCEMENT') || log.action.includes('EVENT')) {
-                badgeColor = 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300';
+                badgeColor = 'bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-200 dark:border dark:border-rose-800/60';
               }
 
               return (
@@ -848,11 +848,11 @@ export const DashboardPage: React.FC = () => {
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${badgeColor}`}>
                       {log.action.replace(/_/g, ' ')}
                     </span>
-                    <span className="text-slate-700 dark:text-slate-300 font-medium truncate">
+                    <span className="text-slate-700 dark:text-slate-200 font-medium truncate">
                       by {log.actor_name || 'System Admin'}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-400 font-mono shrink-0">
                     {formatDateTime(log.created_at)}
                   </span>
                 </div>
