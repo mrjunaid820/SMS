@@ -48,6 +48,35 @@ export const DashboardPage: React.FC = () => {
   const [stats, setStats] = useState<any>(null);
   const [teacherAssignments, setTeacherAssignments] = useState<TeacherAssignment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const isFirstMountRef = React.useRef(true);
+
+  // Default resilient fallback stats to ensure progressive non-blocking rendering
+  const DEFAULT_STATS = {
+    totalActiveStudents: 0,
+    activeTeachers: 0,
+    totalClasses: 0,
+    totalSections: 0,
+    totalPublishedAnnouncements: 0,
+    recentAnnouncements: [],
+    upcomingEvents: [],
+    todayAttendance: {
+      totalMarked: 0,
+      present: 0,
+      absent: 0,
+      leave: 0,
+      percentage: 0,
+    },
+    financial: {
+      totalInvoiced: 0,
+      totalCollected: 0,
+      totalOutstanding: 0,
+      monthlyCollection: 0,
+    },
+    upcomingExams: [],
+    recentActivity: [],
+  };
+
+  const safeStats = stats || DEFAULT_STATS;
 
   // Period filter for Attendance Overview doughnut
   const [attendancePeriod, setAttendancePeriod] = useState<'today' | 'this_week' | 'this_month'>('this_month');
@@ -86,8 +115,12 @@ export const DashboardPage: React.FC = () => {
     loadDashboardData();
   }, [role, selectedSessionId]);
 
-  // Recalculate attendance summary when attendance period changes
+  // Recalculate attendance summary when attendance period changes (skips duplicate mount)
   useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
     const fetchAttSummary = async () => {
       try {
         const res = await attendanceApi.getAttendanceSummaryByPeriod(attendancePeriod);
@@ -98,24 +131,6 @@ export const DashboardPage: React.FC = () => {
     };
     fetchAttSummary();
   }, [attendancePeriod]);
-
-  if (isLoading || !stats) {
-    return (
-      <div className="space-y-6 animate-pulse">
-        <div className="h-28 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-24 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="h-72 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-          <div className="h-72 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-          <div className="h-72 bg-slate-200 dark:bg-slate-800 rounded-2xl" />
-        </div>
-      </div>
-    );
-  }
 
   // -------------------------------------------------------------
   // TEACHER DASHBOARD VIEW (Role-Scoped: Assigned Classes & Exams)
@@ -157,7 +172,16 @@ export const DashboardPage: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {teacherAssignments.length > 0 ? (
+              {isLoading && teacherAssignments.length === 0 ? (
+                <div className="space-y-3">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse">
+                      <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded mb-2" />
+                      <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : teacherAssignments.length > 0 ? (
                 teacherAssignments.map((a) => (
                   <div
                     key={a.id}
@@ -204,8 +228,17 @@ export const DashboardPage: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {stats.upcomingExams && stats.upcomingExams.length > 0 ? (
-                stats.upcomingExams.map((exam: any) => (
+              {isLoading && !stats ? (
+                <div className="space-y-3">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse">
+                      <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded mb-2" />
+                      <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : safeStats.upcomingExams && safeStats.upcomingExams.length > 0 ? (
+                safeStats.upcomingExams.map((exam: any) => (
                   <div
                     key={exam.id}
                     className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between"
@@ -243,10 +276,10 @@ export const DashboardPage: React.FC = () => {
   // -------------------------------------------------------------
 
   // Real Attendance Calculations based on selected period
-  const totalAtt = attendanceSummary?.total || stats.todayAttendance.totalMarked || 0;
-  const presentPct = attendanceSummary ? attendanceSummary.presentPercentage : stats.todayAttendance.percentage;
-  const absentPct = attendanceSummary ? attendanceSummary.absentPercentage : (totalAtt > 0 ? Math.round((stats.todayAttendance.absent / totalAtt) * 100) : 0);
-  const latePct = attendanceSummary ? attendanceSummary.latePercentage : (totalAtt > 0 ? Math.round((stats.todayAttendance.late / totalAtt) * 100) : 0);
+  const totalAtt = attendanceSummary?.total || safeStats.todayAttendance?.totalMarked || 0;
+  const presentPct = attendanceSummary ? attendanceSummary.presentPercentage : (safeStats.todayAttendance?.percentage || 0);
+  const absentPct = attendanceSummary ? attendanceSummary.absentPercentage : (totalAtt > 0 ? Math.round(((safeStats.todayAttendance?.absent || 0) / totalAtt) * 100) : 0);
+  const latePct = attendanceSummary ? attendanceSummary.latePercentage : (totalAtt > 0 ? Math.round(((safeStats.todayAttendance?.late || 0) / totalAtt) * 100) : 0);
 
   // Doughnut Chart Data
   const attendanceDonutData = [
@@ -266,8 +299,8 @@ export const DashboardPage: React.FC = () => {
 
   // Upcoming Events list (real database records with graceful fallbacks)
   const displayEvents =
-    stats.upcomingEvents && stats.upcomingEvents.length > 0
-      ? stats.upcomingEvents.slice(0, 3)
+    safeStats.upcomingEvents && safeStats.upcomingEvents.length > 0
+      ? safeStats.upcomingEvents.slice(0, 3)
       : [
           {
             id: 'ev-default-1',
@@ -349,7 +382,7 @@ export const DashboardPage: React.FC = () => {
         {/* Card 1: Active Students */}
         <div
           onClick={() => navigate('/students')}
-          className="bg-[#edf5fe] dark:bg-slate-850/80 rounded-2xl border border-blue-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#edf5fe] dark:bg-slate-850/80 rounded-2xl border border-blue-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs">
@@ -358,16 +391,20 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Active Students</p>
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.totalActiveStudents !== undefined ? stats.totalActiveStudents.toLocaleString() : 0}
-            </h3>
+            {isLoading && !stats ? (
+              <div className="h-6 w-16 bg-blue-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+                {safeStats.totalActiveStudents !== undefined ? safeStats.totalActiveStudents.toLocaleString() : 0}
+              </h3>
+            )}
           </div>
         </div>
 
         {/* Card 2: Total Teachers */}
         <div
           onClick={() => navigate('/teachers')}
-          className="bg-[#edfbf4] dark:bg-slate-850/80 rounded-2xl border border-emerald-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#edfbf4] dark:bg-slate-850/80 rounded-2xl border border-emerald-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-emerald-500 text-white shadow-xs">
@@ -376,16 +413,20 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Teachers</p>
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.activeTeachers !== undefined ? stats.activeTeachers.toLocaleString() : 0}
-            </h3>
+            {isLoading && !stats ? (
+              <div className="h-6 w-14 bg-emerald-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+                {safeStats.activeTeachers !== undefined ? safeStats.activeTeachers.toLocaleString() : 0}
+              </h3>
+            )}
           </div>
         </div>
 
         {/* Card 3: Today's Attendance */}
         <div
           onClick={() => navigate('/attendance')}
-          className="bg-[#f5f1fe] dark:bg-slate-850/80 rounded-2xl border border-purple-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#f5f1fe] dark:bg-slate-850/80 rounded-2xl border border-purple-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-xs">
@@ -394,16 +435,20 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Today's Attendance</p>
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {presentPct > 0 ? `${presentPct}%` : '0%'}
-            </h3>
+            {isLoading && !stats && !attendanceSummary ? (
+              <div className="h-6 w-14 bg-purple-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+                {presentPct > 0 ? `${presentPct}%` : '0%'}
+              </h3>
+            )}
           </div>
         </div>
 
         {/* Card 4: Pending Fees */}
         <div
           onClick={() => navigate('/fees-accounts')}
-          className="bg-[#fff7ea] dark:bg-slate-850/80 rounded-2xl border border-amber-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#fff7ea] dark:bg-slate-850/80 rounded-2xl border border-amber-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-xs">
@@ -412,16 +457,20 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pending Fees</p>
-            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
-              {stats.financial ? formatCurrency(stats.financial.totalOutstanding) : 'Rs. 0'}
-            </h3>
+            {isLoading && !stats ? (
+              <div className="h-6 w-20 bg-amber-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
+                {safeStats.financial ? formatCurrency(safeStats.financial.totalOutstanding) : 'Rs. 0'}
+              </h3>
+            )}
           </div>
         </div>
 
         {/* Card 5: Upcoming Exams */}
         <div
           onClick={() => navigate('/examinations')}
-          className="bg-[#e6f8f9] dark:bg-slate-850/80 rounded-2xl border border-cyan-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#e6f8f9] dark:bg-slate-850/80 rounded-2xl border border-cyan-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-cyan-600 text-white shadow-xs">
@@ -430,18 +479,22 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Upcoming Exams</p>
-            <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
-              {stats.upcomingExams && stats.upcomingExams.length > 0
-                ? formatDate(stats.upcomingExams[0].start_date)
-                : 'None Scheduled'}
-            </h3>
+            {isLoading && !stats ? (
+              <div className="h-6 w-20 bg-cyan-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight truncate">
+                {safeStats.upcomingExams && safeStats.upcomingExams.length > 0
+                  ? formatDate(safeStats.upcomingExams[0].start_date)
+                  : 'None Scheduled'}
+              </h3>
+            )}
           </div>
         </div>
 
         {/* Card 6: Latest Notices */}
         <div
           onClick={() => navigate('/events-announcements')}
-          className="bg-[#fff0f4] dark:bg-slate-850/80 rounded-2xl border border-rose-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+          className="bg-[#fff0f4] dark:bg-slate-850/80 rounded-2xl border border-rose-100/90 dark:border-slate-800 p-4 transition-all hover:shadow-sm hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between min-h-[105px]"
         >
           <div className="flex items-center mb-3">
             <div className="p-2.5 rounded-xl bg-rose-500 text-white shadow-xs">
@@ -450,9 +503,13 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div>
             <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Latest Notices</p>
-            <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
-              {stats.recentAnnouncements?.length !== undefined ? `${stats.recentAnnouncements.length} New` : '0 New'}
-            </h3>
+            {isLoading && !stats ? (
+              <div className="h-6 w-14 bg-rose-200/60 dark:bg-slate-700/60 rounded animate-pulse mt-1" />
+            ) : (
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-slate-100 mt-0.5 leading-tight">
+                {safeStats.recentAnnouncements?.length !== undefined ? `${safeStats.recentAnnouncements.length} New` : '0 New'}
+              </h3>
+            )}
           </div>
         </div>
       </div>
@@ -478,38 +535,45 @@ export const DashboardPage: React.FC = () => {
             </select>
           </div>
 
-          <div className="py-4 flex items-center justify-around gap-2">
-            {/* Doughnut Chart with Center Number */}
-            <div className="relative w-36 h-36 flex items-center justify-center shrink-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={attendanceDonutData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={48}
-                    outerRadius={68}
-                    paddingAngle={3}
-                    dataKey="value"
-                    startAngle={90}
-                    endAngle={-270}
-                  >
-                    {attendanceDonutData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: any) => [`${value}%`, 'Attendance Ratio']} />
-                </PieChart>
-              </ResponsiveContainer>
-
-              {/* Inner Percentage Center */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-2xl font-bold text-slate-900 dark:text-white leading-none">
-                  {presentPct > 0 ? `${presentPct}%` : '94%'}
-                </span>
-                <span className="text-[10px] text-slate-400 font-medium mt-0.5">Present</span>
+          <div className="py-4 flex items-center justify-around gap-2 min-h-[160px]">
+            {isLoading && !attendanceSummary && !stats ? (
+              <div className="w-36 h-36 flex items-center justify-center">
+                <div className="w-28 h-28 rounded-full border-4 border-slate-100 dark:border-slate-800 border-t-emerald-500 animate-spin flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-full bg-white dark:bg-slate-900" />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="relative w-36 h-36 flex items-center justify-center shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={attendanceDonutData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={48}
+                      outerRadius={68}
+                      paddingAngle={3}
+                      dataKey="value"
+                      startAngle={90}
+                      endAngle={-270}
+                    >
+                      {attendanceDonutData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: any) => [`${value}%`, 'Attendance Ratio']} />
+                  </PieChart>
+                </ResponsiveContainer>
+
+                {/* Inner Percentage Center */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-2xl font-bold text-slate-900 dark:text-white leading-none">
+                    {presentPct > 0 ? `${presentPct}%` : '94%'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium mt-0.5">Present</span>
+                </div>
+              </div>
+            )}
 
             {/* Attendance Legend */}
             <div className="space-y-2.5 text-xs">
@@ -666,51 +730,68 @@ export const DashboardPage: React.FC = () => {
             </button>
           </div>
 
-          <div className="py-3 space-y-3 relative z-10">
-            {displayEvents.map((ev: any) => {
-              const eventDateObj = new Date(ev.event_date);
-              const monthStr = eventDateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-              const dayStr = eventDateObj.getDate();
-
-              // Dot color mapping based on category
-              let dotColor = 'bg-emerald-500';
-              if (ev.category === 'Meeting' || ev.event_category === 'meeting') dotColor = 'bg-amber-500';
-              if (ev.category === 'Sports' || ev.event_category === 'sports') dotColor = 'bg-purple-500';
-              if (ev.category === 'Holiday' || ev.event_category === 'holiday') dotColor = 'bg-rose-500';
-
-              return (
+          {isLoading && !stats ? (
+            <div className="py-3 space-y-3 relative z-10">
+              {[1, 2, 3].map((i) => (
                 <div
-                  key={ev.id}
-                  onClick={() => navigate('/events-announcements')}
-                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group"
+                  key={i}
+                  className="flex items-center gap-3 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 animate-pulse"
                 >
-                  {/* Date Badge */}
-                  <div className="w-12 h-13 rounded-xl bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center text-center shrink-0 border border-slate-200/60 dark:border-slate-700 group-hover:border-blue-300">
-                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-none">
-                      {monthStr}
-                    </span>
-                    <span className="text-base font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
-                      {dayStr}
-                    </span>
-                  </div>
-
-                  {/* Event Details */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600">
-                        {ev.title}
-                      </h4>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 pl-4">
-                      {ev.target_audience || 'All Classes'} • {ev.start_time || '09:00 AM'}
-                      {ev.venue ? ` • ${ev.venue}` : ''}
-                    </p>
+                  <div className="w-12 h-13 rounded-xl bg-slate-200 dark:bg-slate-700 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded" />
+                    <div className="h-2.5 w-48 bg-slate-100 dark:bg-slate-800 rounded" />
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-3 space-y-3 relative z-10">
+              {displayEvents.map((ev: any) => {
+                const eventDateObj = new Date(ev.event_date);
+                const monthStr = eventDateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                const dayStr = eventDateObj.getDate();
+
+                // Dot color mapping based on category
+                let dotColor = 'bg-emerald-500';
+                if (ev.category === 'Meeting' || ev.event_category === 'meeting') dotColor = 'bg-amber-500';
+                if (ev.category === 'Sports' || ev.event_category === 'sports') dotColor = 'bg-purple-500';
+                if (ev.category === 'Holiday' || ev.event_category === 'holiday') dotColor = 'bg-rose-500';
+
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => navigate('/events-announcements')}
+                    className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group"
+                  >
+                    {/* Date Badge */}
+                    <div className="w-12 h-13 rounded-xl bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center text-center shrink-0 border border-slate-200/60 dark:border-slate-700 group-hover:border-blue-300">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-none">
+                        {monthStr}
+                      </span>
+                      <span className="text-base font-bold text-slate-900 dark:text-slate-100 leading-none mt-1">
+                        {dayStr}
+                      </span>
+                    </div>
+
+                    {/* Event Details */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600">
+                          {ev.title}
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5 pl-4">
+                        {ev.target_audience || 'All Classes'} • {ev.start_time || '09:00 AM'}
+                        {ev.venue ? ` • ${ev.venue}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="pt-2 text-center border-t border-slate-100 dark:border-slate-800 relative z-10">
             <span className="text-[11px] text-slate-400">Institutional Calendar & Announcements</span>
@@ -738,8 +819,20 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {stats.recentActivity && stats.recentActivity.length > 0 ? (
-            stats.recentActivity.slice(0, 5).map((log: any) => {
+          {isLoading && !stats ? (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="py-2.5 flex items-center justify-between gap-3 animate-pulse">
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded-full" />
+                    <div className="h-3 w-32 bg-slate-200 dark:bg-slate-700 rounded" />
+                  </div>
+                  <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded font-mono" />
+                </div>
+              ))}
+            </div>
+          ) : safeStats.recentActivity && safeStats.recentActivity.length > 0 ? (
+            safeStats.recentActivity.slice(0, 5).map((log: any) => {
               let badgeColor = 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300';
               if (log.action.includes('PAYMENT') || log.action.includes('FEE')) {
                 badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';

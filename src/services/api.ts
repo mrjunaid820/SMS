@@ -127,7 +127,7 @@ export async function logAudit(
 export const settingsApi = {
   getSettings: async (): Promise<SchoolSettings> => {
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('school_settings').select('*').limit(1).single();
+      const { data, error } = await supabase.from('school_settings').select('*').limit(1).maybeSingle();
       if (!error && data) return data;
     }
     return getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
@@ -4003,36 +4003,65 @@ export const auditApi = {
 // -------------------------------------------------------------
 export const dashboardApi = {
   getLiveStatistics: async () => {
-    const students = await studentApi.getStudents(false);
-    const teachers = await teacherApi.getTeachers();
-    const classes = await academicStructureApi.getClasses();
-    const sections = await academicStructureApi.getSections();
-    const financial = await feeApi.getFinancialSummary();
-    let todayRecords: AttendanceRecord[] = [];
     const today = new Date().toISOString().split('T')[0];
 
-    if (isLiveSupabaseConfigured()) {
-      try {
-        const { data: liveAtt } = await supabase.from('attendance').select('*').eq('date', today);
-        if (liveAtt) todayRecords = liveAtt;
-      } catch (e) {
-        console.warn('Could not query live attendance for dashboard', e);
+    const attendancePromise = (async (): Promise<AttendanceRecord[]> => {
+      if (isLiveSupabaseConfigured()) {
+        try {
+          const { data: liveAtt } = await supabase.from('attendance').select('*').eq('date', today);
+          if (liveAtt && liveAtt.length > 0) return liveAtt;
+        } catch (e) {
+          console.warn('Could not query live attendance for dashboard', e);
+        }
       }
-    }
-
-    if (todayRecords.length === 0 && !isLiveSupabaseConfigured()) {
       const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
-      todayRecords = attendance.filter(a => a.date === today);
-    }
+      return attendance.filter(a => a.date === today);
+    })();
+
+    const [
+      studentsRes,
+      teachersRes,
+      classesRes,
+      sectionsRes,
+      financialRes,
+      todayRecordsRes,
+      examsRes,
+      auditLogsRes,
+      announcementsRes,
+      upcomingEventsRes,
+    ] = await Promise.allSettled([
+      studentApi.getStudents(false),
+      teacherApi.getTeachers(),
+      academicStructureApi.getClasses(),
+      academicStructureApi.getSections(),
+      feeApi.getFinancialSummary(),
+      attendancePromise,
+      examApi.getExams(),
+      auditApi.getLogs(),
+      announcementApi.getAnnouncements({ status: 'published' }),
+      eventApi.getUpcomingEvents(5),
+    ]);
+
+    const students = studentsRes.status === 'fulfilled' ? studentsRes.value : [];
+    const teachers = teachersRes.status === 'fulfilled' ? teachersRes.value : [];
+    const classes = classesRes.status === 'fulfilled' ? classesRes.value : [];
+    const sections = sectionsRes.status === 'fulfilled' ? sectionsRes.value : [];
+    const financial = financialRes.status === 'fulfilled' ? financialRes.value : {
+      totalInvoiced: 0,
+      totalCollected: 0,
+      totalOutstanding: 0,
+      monthlyCollection: 0,
+    };
+    const todayRecords = todayRecordsRes.status === 'fulfilled' ? todayRecordsRes.value : [];
+    const exams = examsRes.status === 'fulfilled' ? examsRes.value : [];
+    const auditLogs = auditLogsRes.status === 'fulfilled' ? auditLogsRes.value : [];
+    const announcements = announcementsRes.status === 'fulfilled' ? announcementsRes.value : [];
+    const upcomingEvents = upcomingEventsRes.status === 'fulfilled' ? upcomingEventsRes.value : [];
 
     const presentCount = todayRecords.filter(a => a.status === 'Present' || a.status === 'Late').length;
     const absentCount = todayRecords.filter(a => a.status === 'Absent').length;
     const leaveCount = todayRecords.filter(a => a.status === 'Leave').length;
     const attendancePercentage = todayRecords.length > 0 ? Math.round((presentCount / todayRecords.length) * 100) : 0;
-    const exams = await examApi.getExams();
-    const auditLogs = await auditApi.getLogs();
-    const announcements = await announcementApi.getAnnouncements({ status: 'published' });
-    const upcomingEvents = await eventApi.getUpcomingEvents(5);
 
     return {
       totalActiveStudents: students.length,

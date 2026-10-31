@@ -85,8 +85,9 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     }
   };
 
-  // Preload searchable dataset for instant global search
+  // Preload searchable dataset for instant global search (deferred to prioritize initial dashboard paint)
   useEffect(() => {
+    let timerId: any = null;
     const loadSearchData = async () => {
       try {
         const [students, teachers, classes, invoices] = await Promise.all([
@@ -100,8 +101,17 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
         // non-blocking
       }
     };
-    loadSearchData();
+
+    // Give high-priority dashboard statistics first claim on network bandwidth
+    timerId = setTimeout(() => {
+      loadSearchData();
+    }, 250);
+
     loadNotifications();
+
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
   }, [user?.id, role]);
 
   // Click outside listener for all dropdowns

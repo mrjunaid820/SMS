@@ -36,9 +36,13 @@ import { MyFeesPage } from '@/pages/StudentPortal/MyFeesPage';
 import { MyFeeChallansPage } from '@/pages/StudentPortal/MyFeeChallansPage';
 import { MyDuesPage } from '@/pages/StudentPortal/MyDuesPage';
 import { MyAnnouncementsPage } from '@/pages/StudentPortal/MyAnnouncementsPage';
+import { BrandedLoadingScreen } from '@/components/common/BrandedLoadingScreen';
 
 const ProtectedLayout: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -46,7 +50,10 @@ const ProtectedLayout: React.FC = () => {
 };
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { role } = useAuth();
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (role !== 'admin') {
     return <Navigate to={role === 'student' ? '/student-dashboard' : '/teacher-dashboard'} replace />;
   }
@@ -54,7 +61,10 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const TeacherRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { role } = useAuth();
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (role !== 'teacher') {
     return <Navigate to={role === 'student' ? '/student-dashboard' : '/admin-dashboard'} replace />;
   }
@@ -62,7 +72,10 @@ const TeacherRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 };
 
 const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { role } = useAuth();
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (role !== 'student') {
     return <Navigate to={role === 'teacher' ? '/teacher-dashboard' : '/admin-dashboard'} replace />;
   }
@@ -70,7 +83,10 @@ const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 };
 
 const StaffRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { role } = useAuth();
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (role === 'student') {
     return <Navigate to="/student-dashboard" replace />;
   }
@@ -78,7 +94,10 @@ const StaffRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 const DashboardRedirect: React.FC = () => {
-  const { role } = useAuth();
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <BrandedLoadingScreen />;
+  }
   if (role === 'student') {
     return <Navigate to="/student-dashboard" replace />;
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
@@ -9,13 +9,26 @@ import { Shield, Lock, Mail, Eye, EyeOff } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, isLoading } = useAuth();
+  const { login, isLoading, isAuthenticated, role } = useAuth();
   const { settings } = useSchool();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+
+  // Automatically redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      if (role === 'teacher') {
+        navigate('/teacher-dashboard', { replace: true });
+      } else if (role === 'student') {
+        navigate('/student-dashboard', { replace: true });
+      } else {
+        navigate('/admin-dashboard', { replace: true });
+      }
+    }
+  }, [isAuthenticated, isLoading, role, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

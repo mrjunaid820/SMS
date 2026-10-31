@@ -37,8 +37,19 @@
   }
 }
 
-@media screen {
-  .print-only {
-    display: none !important;
+@keyframes indeterminate-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(50%);
+  }
+  100% {
+    transform: translateX(200%);
   }
 }
+
+.animate-indeterminate-bar {
+  animation: indeterminate-bar 1.5s infinite ease-in-out;
+}
+
