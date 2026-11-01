@@ -184,7 +184,7 @@ export const TeacherDashboardPage: React.FC = () => {
 
       // Count active students enrolled in this section
       const enrolledStudents = allEnrollments.filter(
-        (e) => e.section_id === secId && e.status !== 'archived'
+        (e) => e.section_id === secId && e.status === 'active'
       );
 
       // Check today's attendance
@@ -230,7 +230,7 @@ export const TeacherDashboardPage: React.FC = () => {
     const assignedSectionIds = new Set(assignments.map((a) => a.section_id));
     const uniqueStudentIds = new Set(
       allEnrollments
-        .filter((e) => assignedSectionIds.has(e.section_id) && e.status !== 'archived')
+        .filter((e) => assignedSectionIds.has(e.section_id) && e.status === 'active')
         .map((e) => e.student_id)
     );
     return uniqueStudentIds.size;
