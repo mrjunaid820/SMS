@@ -27,6 +27,9 @@ import { DailyDiaryPage } from '@/pages/DailyDiary/DailyDiaryPage';
 import { EventsAnnouncementsPage } from '@/pages/EventsAnnouncements/EventsAnnouncementsPage';
 import { LoginPage } from '@/pages/Auth/LoginPage';
 
+// Teacher Portal Modules
+import { TeacherDashboardPage } from '@/pages/TeacherPortal/TeacherDashboardPage';
+
 // Student Portal Modules
 import { StudentDashboardPage } from '@/pages/StudentPortal/StudentDashboardPage';
 import { MyQuizMarksPage } from '@/pages/StudentPortal/MyQuizMarksPage';
@@ -130,7 +133,7 @@ export const App: React.FC = () => {
                   path="/teacher-dashboard"
                   element={
                     <TeacherRoute>
-                      <DashboardPage />
+                      <TeacherDashboardPage />
                     </TeacherRoute>
                   }
                 />

@@ -128,7 +128,7 @@ export const settingsApi = {
   getSettings: async (): Promise<SchoolSettings> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('school_settings').select('*').limit(1).maybeSingle();
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     return getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
   },
@@ -153,7 +153,7 @@ export const settingsApi = {
   getSessions: async (): Promise<AcademicSession[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('academic_sessions').select('*').order('start_date', { ascending: false });
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     return getStorage<AcademicSession[]>('sessions', INITIAL_SESSIONS);
   },
@@ -191,7 +191,7 @@ export const academicStructureApi = {
   getClasses: async (): Promise<ClassLevel[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('classes').select('*').order('numeric_order', { ascending: true });
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     return getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
   },
@@ -214,7 +214,7 @@ export const academicStructureApi = {
   getSections: async (): Promise<Section[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('sections').select('*, class:classes(*)').order('name');
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     const sections = getStorage<Section[]>('sections', INITIAL_SECTIONS);
     const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
@@ -242,7 +242,7 @@ export const academicStructureApi = {
   getSubjects: async (): Promise<Subject[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('subjects').select('*, class:classes(*)').order('name');
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
     const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
@@ -275,7 +275,7 @@ export const teacherApi = {
   getTeachers: async (): Promise<Teacher[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('teachers').select('*').order('employee_id');
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const profileIds = data.filter((t: any) => t.profile_id).map((t: any) => t.profile_id);
         const profileStatusMap = new Map<string, boolean>();
         if (profileIds.length > 0) {
@@ -1139,7 +1139,7 @@ export const teacherApi = {
       let query = supabase.from('teacher_assignments').select('*, teacher:teachers(*), section:sections(*, class:classes(*)), subject:subjects(*), academic_session:academic_sessions(*)');
       if (sessionId) query = query.eq('academic_session_id', sessionId);
       const { data, error } = await query;
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     const assignments = getStorage<TeacherAssignment[]>('assignments', INITIAL_ASSIGNMENTS);
     const teachers = getStorage<Teacher[]>('teachers', INITIAL_TEACHERS);
@@ -1241,7 +1241,7 @@ export const studentApi = {
       if (sessionId) q = q.eq('academic_session_id', sessionId);
       if (sectionId) q = q.eq('section_id', sectionId);
       const { data, error } = await q;
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
     const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
@@ -3992,7 +3992,7 @@ export const auditApi = {
   getLogs: async (): Promise<AuditLog[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200);
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     return getStorage<AuditLog[]>('audit_logs', INITIAL_AUDIT_LOGS);
   },
@@ -4092,7 +4092,7 @@ export const userApi = {
   getProfiles: async (): Promise<Profile[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
     return getStorage<Profile[]>('profiles', INITIAL_PROFILES);
   },
@@ -4290,7 +4290,7 @@ export const quizApi = {
         .from('quiz_marks')
         .select('*, enrollment:enrollments(*, student:students(*)), quiz:quizzes(*)')
         .eq('quiz_id', quizId);
-      if (!error && data) return data;
+      if (!error && data && data.length > 0) return data;
     }
 
     const allMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
@@ -5739,7 +5739,7 @@ export const announcementApi = {
           .select('*, class:classes(*), section:sections(*), author:profiles(*)')
           .eq('id', id)
           .single();
-        if (!error && data) return data;
+        if (!error && data && data.length > 0) return data;
       } catch {}
     }
     const all = getStorage<SchoolAnnouncement[]>('announcements', INITIAL_ANNOUNCEMENTS);
@@ -6037,7 +6037,7 @@ export const eventApi = {
           .select('*, class:classes(*), section:sections(*), organizer:profiles(*)')
           .eq('id', id)
           .single();
-        if (!error && data) return data;
+        if (!error && data && data.length > 0) return data;
       } catch {}
     }
     const all = getStorage<SchoolEvent[]>('school_events', INITIAL_EVENTS);

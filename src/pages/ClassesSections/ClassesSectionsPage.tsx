@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { ClassLevel, Section } from '@/types/database';
 import { academicStructureApi } from '@/services/api';
 import { Button } from '@/components/common/Button';
@@ -10,6 +11,7 @@ import { Badge } from '@/components/common/Badge';
 import { School, Plus, DoorOpen, Users } from 'lucide-react';
 
 export const ClassesSectionsPage: React.FC = () => {
+  const { role } = useAuth();
   const [classes, setClasses] = useState<ClassLevel[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,35 +78,37 @@ export const ClassesSectionsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Plus className="w-3.5 h-3.5" />}
-            onClick={() => {
-              setSectionForm({
-                class_id: classes[0]?.id || '',
-                name: 'C',
-                capacity: 40,
-                room_no: 'Room 105',
-              });
-              setIsAddSectionModalOpen(true);
-            }}
-          >
-            Add Section
-          </Button>
+        {role === 'admin' && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Plus className="w-3.5 h-3.5" />}
+              onClick={() => {
+                setSectionForm({
+                  class_id: classes[0]?.id || '',
+                  name: 'C',
+                  capacity: 40,
+                  room_no: 'Room 105',
+                });
+                setIsAddSectionModalOpen(true);
+              }}
+            >
+              Add Section
+            </Button>
 
-          <Button
-            size="sm"
-            leftIcon={<School className="w-4 h-4" />}
-            onClick={() => {
-              setClassForm({ name: `Class ${classes.length + 1}`, numeric_order: classes.length + 1, description: '' });
-              setIsAddClassModalOpen(true);
-            }}
-          >
-            Add Class
-          </Button>
-        </div>
+            <Button
+              size="sm"
+              leftIcon={<School className="w-4 h-4" />}
+              onClick={() => {
+                setClassForm({ name: `Class ${classes.length + 1}`, numeric_order: classes.length + 1, description: '' });
+                setIsAddClassModalOpen(true);
+              }}
+            >
+              Add Class
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Class Levels Cards Grid */}

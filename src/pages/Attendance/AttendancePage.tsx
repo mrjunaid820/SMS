@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AttendanceStatus, AttendanceRecord, Enrollment, Section, ClassLevel } from '@/types/database';
-import { attendanceApi, studentApi, academicStructureApi } from '@/services/api';
+import { attendanceApi, studentApi, academicStructureApi, teacherApi } from '@/services/api';
 import { useSchool } from '@/context/SchoolContext';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/common/Button';
@@ -22,8 +23,10 @@ import {
 } from 'lucide-react';
 
 export const AttendancePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { selectedSessionId } = useSchool();
+  const [searchParams] = useSearchParams();
+  const urlSectionId = searchParams.get('sectionId');
 
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [classes, setClasses] = useState<ClassLevel[]>([]);
@@ -46,14 +49,35 @@ export const AttendancePage: React.FC = () => {
         academicStructureApi.getClasses(),
         academicStructureApi.getSections(),
       ]);
-      setClasses(cList);
-      setSections(sList);
-      if (sList.length > 0 && !selectedSectionId) {
-        setSelectedSectionId(sList[0].id);
+
+      let availableSections = sList;
+      if (role === 'teacher') {
+        const [teachers, assignments] = await Promise.all([
+          teacherApi.getTeachers(),
+          teacherApi.getAssignments(selectedSessionId),
+        ]);
+        const currentTeacher = teachers.find(
+          (t) => t.email?.toLowerCase() === user?.email?.toLowerCase() || t.profile_id === user?.id
+        );
+        if (currentTeacher) {
+          const myAssignments = assignments.filter((a) => a.teacher_id === currentTeacher.id);
+          const authorizedSectionIds = new Set(myAssignments.map((a) => a.section_id));
+          availableSections = sList.filter((s) => authorizedSectionIds.has(s.id));
+        }
       }
+
+      setClasses(cList);
+      setSections(availableSections);
+
+      const targetSectionId =
+        urlSectionId && availableSections.some((s) => s.id === urlSectionId)
+          ? urlSectionId
+          : availableSections[0]?.id || '';
+
+      setSelectedSectionId(targetSectionId);
     };
     init();
-  }, []);
+  }, [role, user?.email, user?.id, selectedSessionId, urlSectionId]);
 
   // Load section enrollments and attendance for date
   const loadSectionAttendance = async () => {

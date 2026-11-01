@@ -39,6 +39,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { TeacherAssignment } from '@/types/database';
+import { TeacherDashboardPage } from '@/pages/TeacherPortal/TeacherDashboardPage';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -133,142 +134,10 @@ export const DashboardPage: React.FC = () => {
   }, [attendancePeriod]);
 
   // -------------------------------------------------------------
-  // TEACHER DASHBOARD VIEW (Role-Scoped: Assigned Classes & Exams)
+  // TEACHER DASHBOARD VIEW (Redesigned matching visual reference)
   // -------------------------------------------------------------
   if (role === 'teacher') {
-    const isClassTeacher = teacherAssignments.some((a) => a.is_class_teacher);
-    const classTeacherAssignment = teacherAssignments.find((a) => a.is_class_teacher);
-
-    return (
-      <div className="space-y-6">
-        {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                Teacher Academic Portal
-              </h1>
-              <Badge variant="success">Faculty Access</Badge>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Welcome, <b>{user?.full_name}</b> — Scoped access to assigned classes, attendance and exam grading
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={loadDashboardData} title="Refresh Live Data">
-              <RefreshCw className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Teaching Allocations */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-blue-600" />
-                <CardTitle>My Teaching Allocations (Active Session)</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {isLoading && teacherAssignments.length === 0 ? (
-                <div className="space-y-3">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse">
-                      <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded mb-2" />
-                      <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded" />
-                    </div>
-                  ))}
-                </div>
-              ) : teacherAssignments.length > 0 ? (
-                teacherAssignments.map((a) => (
-                  <div
-                    key={a.id}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                          {a.subject?.name}
-                        </span>
-                        <span className="text-xs font-mono text-slate-400">({a.subject?.code})</span>
-                      </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {a.section?.class?.name} — Section {a.section?.name}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {a.is_class_teacher && <Badge variant="success">Class In-charge</Badge>}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate('/attendance')}
-                        className="text-xs py-1"
-                      >
-                        Attendance
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-6 text-xs text-slate-400">
-                  <p>No teaching allocations found for the active session.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Upcoming Examinations */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-blue-600" />
-                <CardTitle>Upcoming Academic Examinations</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {isLoading && !stats ? (
-                <div className="space-y-3">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 animate-pulse">
-                      <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded mb-2" />
-                      <div className="h-3 w-24 bg-slate-100 dark:bg-slate-800 rounded" />
-                    </div>
-                  ))}
-                </div>
-              ) : safeStats.upcomingExams && safeStats.upcomingExams.length > 0 ? (
-                safeStats.upcomingExams.map((exam: any) => (
-                  <div
-                    key={exam.id}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between"
-                  >
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                        {exam.name}
-                      </h4>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        {formatDate(exam.start_date)} — {formatDate(exam.end_date)}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate('/results-report-cards')}
-                      className="text-xs"
-                    >
-                      Grading Roster
-                    </Button>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-slate-500 text-center py-6">No scheduled examinations.</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <TeacherDashboardPage />;
   }
 
   // -------------------------------------------------------------

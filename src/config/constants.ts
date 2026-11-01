@@ -73,6 +73,17 @@ export const MAIN_NAV_ITEMS: NavItemConfig[] = [
   { id: 'users-roles', label: 'User & Role Mgmt', path: '/users-roles', iconName: 'UserCog', adminOnly: true, category: 'admin' },
 ];
 
+export const TEACHER_NAV_ITEMS: NavItemConfig[] = [
+  { id: 'dashboard', label: 'Dashboard', path: '/teacher-dashboard', iconName: 'LayoutDashboard', category: 'core' },
+  { id: 'my-classes', label: 'My Classes', path: '/classes-sections', iconName: 'Users', category: 'academic' },
+  { id: 'attendance', label: 'Attendance', path: '/attendance', iconName: 'CalendarCheck', category: 'academic' },
+  { id: 'quiz-marks', label: 'Quiz & Marks', path: '/quiz-marks', iconName: 'Award', category: 'academic' },
+  { id: 'daily-diary', label: 'Daily Diary', path: '/daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
+  { id: 'examinations', label: 'Exams', path: '/examinations', iconName: 'FileSpreadsheet', category: 'academic' },
+  { id: 'reports-exports', label: 'Reports', path: '/reports-exports', iconName: 'FileDown', category: 'core' },
+  { id: 'events-announcements', label: 'Announcements', path: '/events-announcements', iconName: 'Megaphone', category: 'core' },
+];
+
 export const STUDENT_NAV_ITEMS: NavItemConfig[] = [
   { id: 'student-dashboard', label: 'My Dashboard', path: '/student-dashboard', iconName: 'LayoutDashboard', category: 'core' },
   { id: 'my-announcements', label: 'Events & Notices', path: '/my-announcements', iconName: 'Megaphone', category: 'core' },

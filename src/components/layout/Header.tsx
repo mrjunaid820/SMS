@@ -90,13 +90,36 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     let timerId: any = null;
     const loadSearchData = async () => {
       try {
-        const [students, teachers, classes, invoices] = await Promise.all([
-          studentApi.getStudents(false).catch(() => []),
-          teacherApi.getTeachers().catch(() => []),
-          academicStructureApi.getClasses().catch(() => []),
-          feeApi.getInvoices().catch(() => []),
-        ]);
-        setSearchDataset({ students, teachers, classes, invoices });
+        if (role === 'teacher') {
+          const [allTeachers, allAssignments, classes, allStudents, allEnrollments] = await Promise.all([
+            teacherApi.getTeachers().catch(() => []),
+            teacherApi.getAssignments().catch(() => []),
+            academicStructureApi.getClasses().catch(() => []),
+            studentApi.getStudents(false).catch(() => []),
+            studentApi.getEnrollments().catch(() => []),
+          ]);
+          const currentTeacher = allTeachers.find(
+            (t) => t.email?.toLowerCase() === user?.email?.toLowerCase() || t.profile_id === user?.id
+          );
+          const authorizedStudentIds = new Set<string>();
+          if (currentTeacher) {
+            const myAsgns = allAssignments.filter((a) => a.teacher_id === currentTeacher.id);
+            const mySectionIds = new Set(myAsgns.map((a) => a.section_id));
+            allEnrollments
+              .filter((e) => mySectionIds.has(e.section_id))
+              .forEach((e) => authorizedStudentIds.add(e.student_id));
+          }
+          const scopedStudents = allStudents.filter((s) => authorizedStudentIds.has(s.id));
+          setSearchDataset({ students: scopedStudents, teachers: [], classes, invoices: [] });
+        } else {
+          const [students, teachers, classes, invoices] = await Promise.all([
+            studentApi.getStudents(false).catch(() => []),
+            teacherApi.getTeachers().catch(() => []),
+            academicStructureApi.getClasses().catch(() => []),
+            feeApi.getInvoices().catch(() => []),
+          ]);
+          setSearchDataset({ students, teachers, classes, invoices });
+        }
       } catch (e) {
         // non-blocking
       }
@@ -142,16 +165,28 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     const results: SearchResultItem[] = [];
 
     // 1. Navigation shortcuts
-    const systemFeatures = [
-      { name: 'Dashboard', sub: 'Institutional Overview', path: '/admin-dashboard', icon: <Activity className="w-3.5 h-3.5 text-blue-500" /> },
-      { name: 'Attendance', sub: 'Class attendance roster', path: '/attendance', icon: <Activity className="w-3.5 h-3.5 text-purple-500" /> },
-      { name: 'Fees & Accounts', sub: 'Challan generation & ledger', path: '/fees-accounts', icon: <Receipt className="w-3.5 h-3.5 text-emerald-500" /> },
-      { name: 'Examinations', sub: 'Marks entry & report cards', path: '/examinations', icon: <FileSpreadsheet className="w-3.5 h-3.5 text-amber-500" /> },
-      { name: 'Daily Diary', sub: 'Homework & syllabus updates', path: '/daily-diary', icon: <Activity className="w-3.5 h-3.5 text-indigo-500" /> },
-      { name: 'Events & Notices', sub: 'School notices & activities', path: '/events-announcements', icon: <Megaphone className="w-3.5 h-3.5 text-rose-500" /> },
-      { name: 'Reports & Exports', sub: 'CSV downloads & rosters', path: '/reports-exports', icon: <Activity className="w-3.5 h-3.5 text-cyan-500" /> },
-      { name: 'School Settings', sub: 'Institution configuration', path: '/school-settings', icon: <Sliders className="w-3.5 h-3.5 text-slate-500" /> },
-    ];
+    const systemFeatures =
+      role === 'teacher'
+        ? [
+            { name: 'Dashboard', sub: 'Teacher Academic Portal', path: '/teacher-dashboard', icon: <Activity className="w-3.5 h-3.5 text-blue-500" /> },
+            { name: 'My Classes', sub: 'Assigned classes and sections', path: '/classes-sections', icon: <School className="w-3.5 h-3.5 text-purple-500" /> },
+            { name: 'Attendance', sub: 'Class attendance roster', path: '/attendance', icon: <Activity className="w-3.5 h-3.5 text-emerald-500" /> },
+            { name: 'Quiz & Marks', sub: 'Class quizzes and grading', path: '/quiz-marks', icon: <Activity className="w-3.5 h-3.5 text-amber-500" /> },
+            { name: 'Daily Diary', sub: 'Homework & syllabus entries', path: '/daily-diary', icon: <Activity className="w-3.5 h-3.5 text-indigo-500" /> },
+            { name: 'Exams', sub: 'Scheduled academic examinations', path: '/examinations', icon: <FileSpreadsheet className="w-3.5 h-3.5 text-rose-500" /> },
+            { name: 'Reports', sub: 'Academic & attendance reports', path: '/reports-exports', icon: <Activity className="w-3.5 h-3.5 text-cyan-500" /> },
+            { name: 'Announcements', sub: 'School notices and activities', path: '/events-announcements', icon: <Megaphone className="w-3.5 h-3.5 text-pink-500" /> },
+          ]
+        : [
+            { name: 'Dashboard', sub: 'Institutional Overview', path: '/admin-dashboard', icon: <Activity className="w-3.5 h-3.5 text-blue-500" /> },
+            { name: 'Attendance', sub: 'Class attendance roster', path: '/attendance', icon: <Activity className="w-3.5 h-3.5 text-purple-500" /> },
+            { name: 'Fees & Accounts', sub: 'Challan generation & ledger', path: '/fees-accounts', icon: <Receipt className="w-3.5 h-3.5 text-emerald-500" /> },
+            { name: 'Examinations', sub: 'Marks entry & report cards', path: '/examinations', icon: <FileSpreadsheet className="w-3.5 h-3.5 text-amber-500" /> },
+            { name: 'Daily Diary', sub: 'Homework & syllabus updates', path: '/daily-diary', icon: <Activity className="w-3.5 h-3.5 text-indigo-500" /> },
+            { name: 'Events & Notices', sub: 'School notices & activities', path: '/events-announcements', icon: <Megaphone className="w-3.5 h-3.5 text-rose-500" /> },
+            { name: 'Reports & Exports', sub: 'CSV downloads & rosters', path: '/reports-exports', icon: <Activity className="w-3.5 h-3.5 text-cyan-500" /> },
+            { name: 'School Settings', sub: 'Institution configuration', path: '/school-settings', icon: <Sliders className="w-3.5 h-3.5 text-slate-500" /> },
+          ];
 
     systemFeatures.forEach((feat) => {
       if (feat.name.toLowerCase().includes(q) || feat.sub.toLowerCase().includes(q)) {
@@ -288,7 +323,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
                 setIsSearchOpen(true);
               }}
               onFocus={() => setIsSearchOpen(true)}
-              placeholder="Search students, teachers, or features..."
+              placeholder={role === 'teacher' ? 'Search students...' : 'Search students, teachers, or features...'}
               className="w-full bg-[#f4f7fc] dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white dark:focus:bg-slate-900 transition-all shadow-2xs"
             />
             {searchQuery && (
@@ -442,10 +477,10 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
           >
             {/* Circular Avatar */}
             <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-700 to-sky-500 text-white flex items-center justify-center font-bold text-xs shadow-xs ring-2 ring-blue-100 dark:ring-blue-900/60 overflow-hidden">
-              {user?.full_name ? user.full_name[0] : 'A'}
+              {user?.full_name ? user.full_name[0] : role === 'teacher' ? 'T' : 'A'}
             </div>
             <span className="hidden sm:inline text-xs font-bold text-slate-800 dark:text-slate-100">
-              {role === 'admin' ? 'Admin' : user?.full_name?.split(' ')[0] || 'User'}
+              {role === 'admin' ? 'Admin' : user?.full_name || 'Teacher'}
             </span>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
           </button>
