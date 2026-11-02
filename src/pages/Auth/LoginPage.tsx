@@ -30,24 +30,6 @@ export const LoginPage: React.FC = () => {
     }
   }, [isAuthenticated, isLoading, role, navigate]);
 
-  const handleQuickLogin = async (quickEmail: string, quickPass: string) => {
-    setEmail(quickEmail);
-    setPassword(quickPass);
-    setError('');
-    try {
-      const authenticatedUser = await login(quickEmail, quickPass);
-      if (authenticatedUser?.role === 'teacher') {
-        navigate('/teacher-dashboard');
-      } else if (authenticatedUser?.role === 'student') {
-        navigate('/student-dashboard');
-      } else {
-        navigate('/admin-dashboard');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Quick login failed');
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -147,53 +129,6 @@ export const LoginPage: React.FC = () => {
             Sign In to ERP Portal
           </Button>
         </form>
-
-        {/* Quick One-Click Demo Access */}
-        <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800 text-left">
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2.5 text-center">
-            One-Click Portal Demo Access
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('tariq.math@islamiapublic.edu.pk', 'Teacher123!')}
-              className="p-2.5 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-left transition-all cursor-pointer group shadow-2xs hover:shadow-xs"
-            >
-              <span className="block text-[11px] font-bold text-blue-900 dark:text-blue-200 group-hover:text-blue-700 dark:group-hover:text-blue-100">
-                Teacher Portal &rarr;
-              </span>
-              <span className="block text-[10px] text-blue-600 dark:text-blue-400 mt-0.5">
-                Mr. Tariq (Faculty)
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin@islamiapublic.edu.pk', 'admin123')}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-all cursor-pointer group shadow-2xs hover:shadow-xs"
-            >
-              <span className="block text-[11px] font-bold text-slate-900 dark:text-slate-200 group-hover:text-slate-700 dark:group-hover:text-white">
-                Admin Portal &rarr;
-              </span>
-              <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Principal (Malik)
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('hamza.khan@student.islamiapublic.edu.pk', 'Student123!')}
-              className="p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-left transition-all cursor-pointer group shadow-2xs hover:shadow-xs"
-            >
-              <span className="block text-[11px] font-bold text-emerald-900 dark:text-emerald-200 group-hover:text-emerald-700 dark:group-hover:text-emerald-100">
-                Student Portal &rarr;
-              </span>
-              <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                Hamza Khan (Class 9)
-              </span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
