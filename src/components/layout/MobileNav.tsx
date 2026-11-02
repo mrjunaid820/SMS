@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS, TEACHER_NAV_ITEMS } from '@/config/constants';
+import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS, STUDENT_PORTAL_NAV_ITEMS, TEACHER_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
 import { SchoolEmblem } from '@/components/common/SchoolEmblem';
@@ -295,7 +295,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
             </>
           ) : (
             (role === 'student'
-              ? STUDENT_NAV_ITEMS
+              ? STUDENT_PORTAL_NAV_ITEMS
               : role === 'teacher'
               ? TEACHER_NAV_ITEMS
               : MAIN_NAV_ITEMS.filter((i) => !i.adminOnly)

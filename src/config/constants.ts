@@ -94,3 +94,14 @@ export const STUDENT_NAV_ITEMS: NavItemConfig[] = [
   { id: 'my-daily-diary', label: 'My Daily Diary', path: '/my-daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
   { id: 'my-profile', label: 'My Profile', path: '/my-profile', iconName: 'UserCheck', category: 'core' },
 ];
+
+export const STUDENT_PORTAL_NAV_ITEMS: NavItemConfig[] = [
+  { id: 'student-dashboard', label: 'Dashboard', path: '/student-dashboard', iconName: 'LayoutDashboard', category: 'core' },
+  { id: 'my-profile', label: 'My Profile', path: '/my-profile', iconName: 'UserCheck', category: 'core' },
+  { id: 'my-attendance', label: 'Attendance', path: '/my-attendance', iconName: 'CalendarCheck', category: 'academic' },
+  { id: 'my-quiz-marks', label: 'Quiz Marks', path: '/my-quiz-marks', iconName: 'Award', category: 'academic' },
+  { id: 'my-exam-results', label: 'Exam Results', path: '/my-exam-results', iconName: 'FileSpreadsheet', category: 'academic' },
+  { id: 'my-fees', label: 'Fees & Dues', path: '/my-fees', iconName: 'Receipt', category: 'finance' },
+  { id: 'my-daily-diary', label: 'Daily Diary', path: '/my-daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
+  { id: 'my-announcements', label: 'Announcements', path: '/my-announcements', iconName: 'Megaphone', category: 'core' },
+];

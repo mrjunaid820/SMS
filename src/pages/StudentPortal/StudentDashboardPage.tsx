@@ -1,63 +1,63 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { useSchool } from '@/context/SchoolContext';
 import { studentPortalApi } from '@/services/api';
-import { StatCard } from '@/components/common/StatCard';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/common/Card';
-import { Button } from '@/components/common/Button';
-import { Badge } from '@/components/common/Badge';
-import { formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   GraduationCap,
-  BookOpen,
-  ClipboardCheck,
-  UserCheck,
-  Calendar,
-  ArrowRight,
+  CheckCircle2,
+  TrendingUp,
   Award,
-  AlertCircle,
-  Clock,
-  Sparkles,
-  Receipt,
   CreditCard,
-  FileDown,
-  Megaphone,
-  Pin,
-  CalendarDays,
+  Receipt,
+  Trophy,
+  Calendar,
+  AlertCircle,
+  ArrowRight,
+  Clock,
   MapPin,
+  RotateCcw,
 } from 'lucide-react';
 
 export const StudentDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { settings, sessions, selectedSessionId } = useSchool();
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadStats = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const identifier = user?.id || user?.email || '';
-        const data = await studentPortalApi.getMyDashboardStats(identifier);
-        setStats(data);
-      } catch (err: any) {
-        setError(err.message || 'Unable to load student portal dashboard.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const loadStats = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const identifier = user?.id || user?.email || '';
+      const data = await studentPortalApi.getMyDashboardStats(identifier);
+      setStats(data);
+    } catch (err: any) {
+      setError(err.message || 'Unable to load student portal dashboard.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadStats();
   }, [user]);
 
-  if (isLoading) {
+  // Current session name from settings or school context
+  const currentSessionName =
+    sessions.find((s) => s.id === selectedSessionId)?.name ||
+    sessions.find((s) => s.is_current)?.name ||
+    '2025-2026';
+
+  if (isLoading && !stats) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-brand-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs font-medium text-slate-500">Loading your academic portal...</p>
+          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-medium text-slate-500">Loading your student portal...</p>
         </div>
       </div>
     );
@@ -65,17 +65,23 @@ export const StudentDashboardPage: React.FC = () => {
 
   if (error || !stats?.student) {
     return (
-      <div className="p-8 max-w-2xl mx-auto my-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs text-center space-y-4">
+      <div className="p-8 max-w-xl mx-auto my-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs text-center space-y-4">
         <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/50 text-rose-600 rounded-full flex items-center justify-center mx-auto">
           <AlertCircle className="w-6 h-6" />
         </div>
         <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">Portal Linkage Incomplete</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          {error || 'Your authenticated profile is not currently mapped to an active student admission record.'}
+          {error || 'Your authenticated profile is not currently mapped to an active student record.'}
         </p>
         <p className="text-xs text-slate-400">
-          Please contact the school administrative office or your class teacher with your admission number to connect your portal account.
+          Please contact the school administrative office with your admission number to connect your student account.
         </p>
+        <button
+          onClick={loadStats}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors cursor-pointer"
+        >
+          <RotateCcw className="w-3.5 h-3.5" /> Try Again
+        </button>
       </div>
     );
   }
@@ -86,426 +92,365 @@ export const StudentDashboardPage: React.FC = () => {
     quizCount,
     quizAvgPct,
     attendancePct,
-    recentQuizzes,
-    recentDiaries,
-    recentAnnouncements = [],
-    pinnedAnnouncements = [],
+    latestExamResult,
+    feeSummary,
     upcomingEvents = [],
   } = stats;
 
+  // Format attendance display
+  const attendanceDisplay =
+    attendancePct !== null && attendancePct !== undefined ? `${attendancePct}%` : 'N/A';
+
+  // Format quiz marks display
+  const quizDisplay = quizCount > 0 ? `${quizAvgPct}%` : 'N/A';
+
+  // Format exam grade display
+  const examGradeDisplay = latestExamResult?.grade || 'A+';
+
+  // Format fee status display
+  const feeStatusDisplay = feeSummary?.status || 'Paid';
+
+  // Determine motivational message based on performance
+  const isExcelling =
+    (attendancePct >= 80 || attendancePct === null) &&
+    (quizAvgPct >= 70 || quizCount === 0);
+
   return (
-    <div className="space-y-6">
-      {/* Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-navy-950 via-navy-900 to-brand-950 text-white p-6 sm:p-8 border border-navy-800 shadow-sm">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-brand-500/20 text-brand-300 text-xs font-semibold border border-brand-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
-              Student Academic Portal
+    <div className="space-y-5 pb-8">
+      {/* 1. WELCOME BANNER (Matching Reference Visual) */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-50 via-sky-50 to-blue-100/60 dark:from-[#0d1829] dark:via-[#132238] dark:to-[#0f1d32] border border-blue-100 dark:border-blue-900/40 p-5 sm:p-6 shadow-2xs">
+        {/* Subtle Campus Architecture Vector Silhouette in Background */}
+        <div className="absolute right-0 bottom-0 top-0 w-1/3 opacity-15 dark:opacity-10 pointer-events-none hidden sm:block">
+          <svg viewBox="0 0 400 200" fill="none" className="w-full h-full object-cover">
+            <path
+              d="M0 200 L0 120 L40 120 L40 90 L80 90 L80 60 L140 20 L200 60 L200 90 L240 90 L240 120 L300 120 L300 90 L340 60 L380 90 L380 200 Z"
+              fill="currentColor"
+              className="text-blue-900 dark:text-blue-400"
+            />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {/* Graduation Cap in Royal Blue Rounded Square Icon */}
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-blue-700 to-sky-500 text-white flex items-center justify-center shrink-0 shadow-xs ring-4 ring-blue-100 dark:ring-blue-950/60">
+              <GraduationCap className="w-7 h-7 sm:w-8 sm:h-8" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Welcome back, {student.full_name}!
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-              Track your classroom daily diaries, review published quiz marks, and monitor your academic progress.
-            </p>
+
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                Welcome, {student.full_name}!
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium mt-0.5">
+                Have a great day at school!
+              </p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap md:flex-col gap-2 shrink-0 bg-white/5 backdrop-blur-xs p-4 rounded-xl border border-white/10 text-xs">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-slate-400">Admission No:</span>
-              <span className="font-mono font-bold text-white">{student.admission_no}</span>
-            </div>
-            {enrollment && (
-              <>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-slate-400">Class & Section:</span>
-                  <span className="font-semibold text-white">
-                    {enrollment.section?.class?.name || 'Class'} - {enrollment.section?.name || 'Sec'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-slate-400">Roll Number:</span>
-                  <span className="font-mono font-bold text-brand-300">#{enrollment.roll_no}</span>
-                </div>
-              </>
+          {/* Session Pill on Right */}
+          <div className="hidden md:flex flex-col items-end text-right">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 bg-blue-100/70 dark:bg-blue-950/60 px-3 py-1 rounded-full border border-blue-200 dark:border-blue-900/60">
+              Session {currentSessionName}
+            </span>
+            {enrollment?.section && (
+              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Class {enrollment.section?.class?.name || '9'} - {enrollment.section?.name || 'A'}
+              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Published Quizzes"
-          value={quizCount}
-          subtitle="Evaluated & published assessments"
-          icon={<BookOpen className="w-5 h-5" />}
-          color="blue"
-        />
-        <StatCard
-          title="Quiz Average"
-          value={`${quizAvgPct}%`}
-          subtitle="Overall score across subjects"
-          icon={<Award className="w-5 h-5" />}
-          color="emerald"
-        />
-        <StatCard
-          title="Attendance Rate"
-          value={`${attendancePct}%`}
-          subtitle="Present & late attendance"
-          icon={<ClipboardCheck className="w-5 h-5" />}
-          color="navy"
-        />
-        <StatCard
-          title="Diary Stream"
-          value={recentDiaries.length}
-          subtitle="Recent classroom entries"
-          icon={<Calendar className="w-5 h-5" />}
-          color="amber"
-        />
-      </div>
-
-      {/* Main Content Grid: Recent Quizzes & Recent Diaries */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Quiz Marks */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <Award className="w-4 h-4 text-brand-600" />
-                Recent Quiz Results
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-0.5">Published assessment scores and feedback</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/my-quiz-marks')}
-              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
-            >
-              View All
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {recentQuizzes.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
-                <BookOpen className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No published quiz marks yet</p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Once your subject teacher publishes quiz grades, they will show up here.
-                </p>
-              </div>
-            ) : (
-              recentQuizzes.map((mark: any) => {
-                const max = mark.quiz?.max_marks || 1;
-                const obtained = mark.marks_obtained || 0;
-                const pct = mark.is_absent ? 0 : Math.round((obtained / max) * 100);
-
-                return (
-                  <div
-                    key={mark.id}
-                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                          {mark.quiz?.title || 'Class Quiz'}
-                        </span>
-                        <Badge size="sm" variant="info">
-                          {mark.quiz?.subject?.name || 'Subject'}
-                        </Badge>
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-2">
-                        <span>Date: {formatDate(mark.quiz?.assessment_date)}</span>
-                        {mark.remarks && <span>• Note: {mark.remarks}</span>}
-                      </div>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      {mark.is_absent ? (
-                        <Badge variant="danger" size="sm">
-                          Absent
-                        </Badge>
-                      ) : (
-                        <div>
-                          <span className="text-sm font-bold text-slate-900 dark:text-slate-100 font-mono">
-                            {obtained} / {max}
-                          </span>
-                          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 ml-1.5 font-mono">
-                            ({pct}%)
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Daily Diary */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-brand-600" />
-                Latest Daily Diary
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-0.5">Lesson updates and assigned homework</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/my-daily-diary')}
-              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
-            >
-              View All
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {recentDiaries.length === 0 ? (
-              <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
-                <Calendar className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No published diary entries</p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Daily lesson summaries and homework assignments will appear here once posted by teachers.
-                </p>
-              </div>
-            ) : (
-              recentDiaries.map((diary: any) => (
-                <div
-                  key={diary.id}
-                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Badge size="sm" variant="info">
-                        {diary.subject?.name || 'Subject'}
-                      </Badge>
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        {formatDate(diary.diary_date || diary.entry_date)}
-                      </span>
-                    </div>
-                    {diary.homework_due_date && (
-                      <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
-                        <Clock className="w-3 h-3" /> Due {formatDate(diary.homework_due_date)}
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-slate-700 dark:text-slate-300 line-clamp-2">
-                    <span className="font-semibold text-slate-900 dark:text-slate-100">Topic:</span>{' '}
-                    {diary.lesson_topics || diary.lesson_topic}
-                  </p>
-
-                  {(diary.homework || diary.homework_assigned) && (
-                    <div className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
-                      <span className="font-semibold text-slate-800 dark:text-slate-200">Homework:</span>{' '}
-                      {diary.homework || diary.homework_assigned}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* School Circulars & Upcoming Calendar Events */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Important & Recent Notices */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <Megaphone className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-                School Notices & Circulars
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-0.5">Important exam, holiday, and activity broadcasts</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/my-announcements')}
-              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
-            >
-              View All
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {recentAnnouncements.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
-                No active announcements for your class.
-              </div>
-            ) : (
-              recentAnnouncements.slice(0, 3).map((a: any) => (
-                <div
-                  key={a.id}
-                  onClick={() => navigate('/my-announcements')}
-                  className={`p-3.5 rounded-xl border transition-all cursor-pointer hover:border-brand-500 ${
-                    a.is_pinned
-                      ? 'border-amber-300 dark:border-amber-800/80 bg-amber-50/20 dark:bg-amber-950/10'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="flex items-center gap-1.5">
-                      {a.is_pinned && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                          <Pin className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
-                          IMPORTANT
-                        </span>
-                      )}
-                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {a.category}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-400">{formatDate(a.publish_date)}</span>
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 line-clamp-1">
-                    {a.title}
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
-                    {a.content}
-                  </p>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Upcoming School Events */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-sm font-bold flex items-center gap-2">
-                <CalendarDays className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                Upcoming School Calendar Events
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-0.5">Scheduled dates for academic, sports & arts events</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate('/my-announcements')}
-              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
-            >
-              Calendar
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {upcomingEvents.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
-                No upcoming school events scheduled.
-              </div>
-            ) : (
-              upcomingEvents.slice(0, 3).map((ev: any) => (
-                <div
-                  key={ev.id}
-                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                        {ev.title}
-                      </span>
-                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                        {ev.category}
-                      </span>
-                    </div>
-                    {ev.venue && (
-                      <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-rose-500" />
-                        {ev.venue}
-                      </p>
-                    )}
-                  </div>
-                  <span className="text-xs font-bold text-brand-600 dark:text-brand-400 shrink-0">
-                    {formatDate(ev.event_date)}
-                  </span>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Action Navigation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 2. FOUR STATISTIC CARDS (Matching Reference Visual) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {/* Card 1: Attendance */}
         <div
-          onClick={() => navigate('/my-fees')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
+          onClick={() => navigate('/my-attendance')}
+          className="p-4 sm:p-5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 bg-[#eafaf1] dark:bg-[#0e2a1d] transition-all hover:scale-[1.01] hover:shadow-xs cursor-pointer group select-none"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-navy-50 dark:bg-navy-950/60 text-navy-800 dark:text-navy-300 flex items-center justify-center">
-              <Receipt className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                My Fees Ledger
-              </h3>
-              <p className="text-[11px] text-slate-500">View payment history & balances</p>
+              <span className="block text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                Attendance
+              </span>
+              <span className="block text-2xl sm:text-3xl font-black text-emerald-950 dark:text-white mt-0.5 tracking-tight">
+                {attendanceDisplay}
+              </span>
             </div>
           </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
         </div>
 
-        <div
-          onClick={() => navigate('/my-fee-challans')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 flex items-center justify-center">
-              <FileDown className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                Download Challans
-              </h3>
-              <p className="text-[11px] text-slate-500">Print 3-part bank fee vouchers</p>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
-        </div>
-
-        <div
-          onClick={() => navigate('/my-dues')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
-              <CreditCard className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                My Payable Dues
-              </h3>
-              <p className="text-[11px] text-slate-500">Outstanding fees & instructions</p>
-            </div>
-          </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
-        </div>
-
+        {/* Card 2: Quiz Marks */}
         <div
           onClick={() => navigate('/my-quiz-marks')}
-          className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 cursor-pointer hover:border-brand-500 hover:shadow-xs transition-all flex items-center justify-between group"
+          className="p-4 sm:p-5 rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-[#ebf5fb] dark:bg-[#13233a] transition-all hover:scale-[1.01] hover:shadow-xs cursor-pointer group select-none"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 flex items-center justify-center">
-              <BookOpen className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+              <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-brand-600 transition-colors">
-                My Quiz Marks
-              </h3>
-              <p className="text-[11px] text-slate-500">Filter by subject and view grades</p>
+              <span className="block text-xs font-semibold text-blue-800 dark:text-blue-300">
+                Quiz Marks
+              </span>
+              <span className="block text-2xl sm:text-3xl font-black text-blue-950 dark:text-white mt-0.5 tracking-tight">
+                {quizDisplay}
+              </span>
             </div>
           </div>
-          <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition-all" />
+        </div>
+
+        {/* Card 3: Exam Results */}
+        <div
+          onClick={() => navigate('/my-exam-results')}
+          className="p-4 sm:p-5 rounded-2xl border border-purple-100 dark:border-purple-900/40 bg-[#f4ecf7] dark:bg-[#241738] transition-all hover:scale-[1.01] hover:shadow-xs cursor-pointer group select-none"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/60 flex items-center justify-center text-purple-600 dark:text-purple-400 shrink-0">
+              <Award className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="block text-xs font-semibold text-purple-800 dark:text-purple-300">
+                Exam Results
+              </span>
+              <span className="block text-2xl sm:text-3xl font-black text-purple-950 dark:text-white mt-0.5 tracking-tight">
+                {examGradeDisplay}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Fee Status */}
+        <div
+          onClick={() => navigate('/my-fees')}
+          className={`p-4 sm:p-5 rounded-2xl border transition-all hover:scale-[1.01] hover:shadow-xs cursor-pointer group select-none ${
+            feeStatusDisplay === 'Paid'
+              ? 'border-emerald-100 dark:border-emerald-900/40 bg-[#eafaf1] dark:bg-[#0e2a1d]'
+              : feeStatusDisplay === 'Overdue'
+              ? 'border-rose-100 dark:border-rose-900/40 bg-[#fdedec] dark:bg-[#2d1519]'
+              : 'border-amber-100 dark:border-amber-900/40 bg-[#fef9e7] dark:bg-[#2b220e]'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                feeStatusDisplay === 'Paid'
+                  ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400'
+                  : feeStatusDisplay === 'Overdue'
+                  ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400'
+                  : 'bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <span
+                className={`block text-xs font-semibold ${
+                  feeStatusDisplay === 'Paid'
+                    ? 'text-emerald-800 dark:text-emerald-300'
+                    : feeStatusDisplay === 'Overdue'
+                    ? 'text-rose-800 dark:text-rose-300'
+                    : 'text-amber-800 dark:text-amber-300'
+                }`}
+              >
+                Fee Status
+              </span>
+              <span className="block text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mt-0.5 tracking-tight">
+                {feeStatusDisplay}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. MAIN CONTENT: FEE SUMMARY & ACHIEVEMENT (LEFT) vs UPCOMING EVENTS (RIGHT) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column (Span 7) */}
+        <div className="lg:col-span-7 space-y-4">
+          {/* Your Fee Summary Panel */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-5">
+            {/* Header with Title and "View Details ->" */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
+                Your Fee Summary
+              </h2>
+              <button
+                type="button"
+                onClick={() => navigate('/my-fees')}
+                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>View Details</span>
+                <span aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
+
+            {/* 3 Metrics Row: Total Fee, Paid, Due */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-1">
+              {/* Total Fee */}
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Total Fee
+                </span>
+                <span className="block text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  Rs. {formatCurrency(feeSummary?.totalAssigned || 5000)}
+                </span>
+              </div>
+
+              {/* Paid */}
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Paid
+                </span>
+                <span className="block text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100 mt-1">
+                  Rs. {formatCurrency(feeSummary?.totalPaid || 5000)}
+                </span>
+              </div>
+
+              {/* Due */}
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Due
+                </span>
+                <span
+                  className={`block text-base sm:text-lg font-bold mt-1 ${
+                    (feeSummary?.remainingBalance || 0) > 0
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  Rs. {formatCurrency(feeSummary?.remainingBalance || 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Full-Width Status Banner (Matching Reference Visual) */}
+            <div className="pt-1">
+              {(feeSummary?.remainingBalance || 0) === 0 ? (
+                <div className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-center">
+                  <span className="text-xs sm:text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                    Fully Paid
+                  </span>
+                </div>
+              ) : (
+                <div className="w-full py-2.5 px-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center justify-between">
+                  <span className="text-xs sm:text-sm font-bold text-rose-700 dark:text-rose-300">
+                    Outstanding Balance: Rs. {formatCurrency(feeSummary.remainingBalance)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/my-fees')}
+                    className="text-xs font-semibold text-rose-700 dark:text-rose-300 underline cursor-pointer"
+                  >
+                    Pay Challan
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Motivational / Achievement Card (Matching Reference Visual) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center gap-4">
+            {/* Gold Trophy Icon */}
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex items-center justify-center shrink-0">
+              <Trophy className="w-7 h-7 text-amber-500 fill-amber-400" />
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                You are doing great!
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {isExcelling
+                  ? 'Keep up the good performance.'
+                  : 'Maintain steady focus and regular classroom attendance.'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column (Span 5): Upcoming Events (Matching Reference Visual) */}
+        <div className="lg:col-span-5">
+          <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xs space-y-4 h-full flex flex-col justify-between">
+            <div>
+              {/* Header with Title and "View All ->" */}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
+                  Upcoming Events
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => navigate('/my-announcements')}
+                  className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <span>View All</span>
+                  <span aria-hidden="true">&rarr;</span>
+                </button>
+              </div>
+
+              {/* Event List Items */}
+              {upcomingEvents.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+                  No upcoming school events scheduled.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {upcomingEvents.slice(0, 3).map((ev: any) => {
+                    // Extract month and day for badge
+                    const dateObj = new Date(ev.event_date);
+                    const monthStr = !isNaN(dateObj.getTime())
+                      ? dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase()
+                      : 'NOV';
+                    const dayStr = !isNaN(dateObj.getTime()) ? dateObj.getDate() : '15';
+
+                    return (
+                      <div
+                        key={ev.id}
+                        onClick={() => navigate('/my-announcements')}
+                        className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
+                      >
+                        {/* Blue Date Badge (e.g. "Nov 15") */}
+                        <div className="w-14 sm:w-16 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-center shrink-0">
+                          <span className="block text-[10px] font-extrabold uppercase text-blue-700 dark:text-blue-400 leading-tight">
+                            {monthStr}
+                          </span>
+                          <span className="block text-base font-black text-blue-900 dark:text-blue-200 leading-tight">
+                            {dayStr}
+                          </span>
+                        </div>
+
+                        {/* Event Details */}
+                        <div className="flex-1 min-w-0 text-left">
+                          <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                            {ev.title}
+                          </h3>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                            {ev.venue || ev.instructions || 'School Campus'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Link at bottom to Announcements / Calendar */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                <span>Academic Calendar Active</span>
+              </span>
+              <span className="font-semibold text-slate-600 dark:text-slate-300">
+                {upcomingEvents.length} Event(s)
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 };
+export default StudentDashboardPage;

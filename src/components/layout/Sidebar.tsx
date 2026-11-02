@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS, TEACHER_NAV_ITEMS } from '@/config/constants';
+import { MAIN_NAV_ITEMS, STUDENT_NAV_ITEMS, STUDENT_PORTAL_NAV_ITEMS, TEACHER_NAV_ITEMS } from '@/config/constants';
 import { useAuth } from '@/context/AuthContext';
 import { useSchool } from '@/context/SchoolContext';
 import { SchoolEmblem } from '@/components/common/SchoolEmblem';
@@ -577,14 +577,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
         ) : (
           /* Teacher / Student Navigation */
           (role === 'student'
-            ? STUDENT_NAV_ITEMS
+            ? STUDENT_PORTAL_NAV_ITEMS
             : role === 'teacher'
             ? TEACHER_NAV_ITEMS
             : MAIN_NAV_ITEMS.filter((item) => !item.adminOnly)
           ).map((item) => {
             const targetPath = item.path;
             const isItemDashboardActive =
-              item.id === 'dashboard' &&
+              (item.id === 'dashboard' || item.id === 'student-dashboard') &&
               (location.pathname === '/dashboard' ||
                 location.pathname === '/admin-dashboard' ||
                 location.pathname === '/teacher-dashboard' ||

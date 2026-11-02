@@ -32,6 +32,8 @@ import { TeacherDashboardPage } from '@/pages/TeacherPortal/TeacherDashboardPage
 
 // Student Portal Modules
 import { StudentDashboardPage } from '@/pages/StudentPortal/StudentDashboardPage';
+import { MyAttendancePage } from '@/pages/StudentPortal/MyAttendancePage';
+import { MyExamResultsPage } from '@/pages/StudentPortal/MyExamResultsPage';
 import { MyQuizMarksPage } from '@/pages/StudentPortal/MyQuizMarksPage';
 import { MyDailyDiaryPage } from '@/pages/StudentPortal/MyDailyDiaryPage';
 import { MyProfilePage } from '@/pages/StudentPortal/MyProfilePage';
@@ -144,6 +146,22 @@ export const App: React.FC = () => {
                   element={
                     <StudentRoute>
                       <StudentDashboardPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-attendance"
+                  element={
+                    <StudentRoute>
+                      <MyAttendancePage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
+                  path="/my-exam-results"
+                  element={
+                    <StudentRoute>
+                      <MyExamResultsPage />
                     </StudentRoute>
                   }
                 />

@@ -1194,7 +1194,7 @@ export const studentApi = {
       let query = supabase.from('students').select('*').order('admission_no', { ascending: true });
       if (!includeArchived) query = query.eq('is_active', true);
       const { data, error } = await query;
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const profileIds = data.filter((s: any) => s.profile_id).map((s: any) => s.profile_id);
         const profileStatusMap = new Map<string, boolean>();
         if (profileIds.length > 0) {
@@ -5122,7 +5122,9 @@ export const studentPortalApi = {
     const student = students.find(
       (s) =>
         s.profile_id === profileId ||
-        (s.email && s.email.toLowerCase() === profileId.toLowerCase())
+        s.id === profileId ||
+        (s.email && s.email.toLowerCase() === profileId.toLowerCase()) ||
+        (s.admission_no && s.admission_no.toLowerCase() === profileId.toLowerCase())
     );
     if (!student) {
       throw new Error('No student record is linked to this user profile.');
@@ -5141,6 +5143,12 @@ export const studentPortalApi = {
     let recentQuizzes: (QuizMark & { quiz: Quiz })[] = [];
     let recentDiaries: DailyDiary[] = [];
     let attendancePct = 100;
+    let latestExamResult: {
+      examName: string;
+      overallPercentage: number;
+      grade: string;
+      status: string;
+    } | null = null;
 
     if (enrollment) {
       // 1. Quizzes (published only)
@@ -5171,6 +5179,60 @@ export const studentPortalApi = {
       const attRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
       const present = attRecords.filter((r) => r.status === 'Present' || r.status === 'Late').length;
       attendancePct = attRecords.length > 0 ? Math.round((present / attRecords.length) * 1000) / 10 : 100;
+
+      // 4. Latest Published Exam Result
+      try {
+        const exams = await examApi.getExams(enrollment.academic_session_id);
+        const publishedExams = exams.filter((e) => e.status === 'Published');
+        if (publishedExams.length > 0) {
+          const sortedExams = [...publishedExams].sort((a, b) => b.start_date.localeCompare(a.start_date));
+          const targetExam = sortedExams[0];
+          const report = await examApi.getStudentReportCardData(enrollment.id, targetExam.id);
+          if (report && report.subjectResults.length > 0) {
+            const gradeInfo = calculateGrade(report.overallPercentage);
+            latestExamResult = {
+              examName: targetExam.name,
+              overallPercentage: report.overallPercentage,
+              grade: gradeInfo.grade,
+              status: report.subjectResults.every((s: any) => s.isPassed) ? 'Passed' : 'Needs Attention',
+            };
+          }
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    }
+
+    // 5. Fee Summary
+    let feeSummary = {
+      totalAssigned: 0,
+      totalPaid: 0,
+      remainingBalance: 0,
+      status: 'Paid' as InvoiceStatus,
+    };
+    try {
+      const feeData = await studentPortalApi.getMyFees(profileId);
+      if (feeData?.summary) {
+        let effectiveStatus: InvoiceStatus = 'Paid';
+        if (feeData.summary.overdueCount > 0) {
+          effectiveStatus = 'Overdue';
+        } else if (feeData.summary.remainingBalance > 0 && feeData.summary.totalPaid > 0) {
+          effectiveStatus = 'Partially Paid';
+        } else if (feeData.summary.remainingBalance > 0) {
+          effectiveStatus = 'Unpaid';
+        } else {
+          effectiveStatus = 'Paid';
+        }
+
+        feeSummary = {
+          totalAssigned: feeData.summary.totalAssigned,
+          totalPaid: feeData.summary.totalPaid,
+          remainingBalance: feeData.summary.remainingBalance,
+          status: effectiveStatus,
+        };
+      }
+    } catch (e) {
+      // non-blocking
     }
 
     const studentAnnouncements = await announcementApi.getAnnouncements(
@@ -5185,6 +5247,8 @@ export const studentPortalApi = {
       quizCount,
       quizAvgPct,
       attendancePct,
+      latestExamResult,
+      feeSummary,
       recentQuizzes,
       recentDiaries,
       recentAnnouncements: studentAnnouncements.slice(0, 5),
@@ -5568,6 +5632,171 @@ export const studentPortalApi = {
     );
 
     return { photo_url: photoUrl };
+  },
+
+  getMyAttendance: async (
+    profileId: string,
+    filters?: { month?: string }
+  ): Promise<{
+    student: Student;
+    enrollment?: Enrollment;
+    totalDays: number;
+    presentDays: number;
+    absentDays: number;
+    lateDays: number;
+    leaveDays: number;
+    attendancePercentage: number;
+    records: AttendanceRecord[];
+    monthlySummary: {
+      month: string;
+      total: number;
+      present: number;
+      absent: number;
+      late: number;
+      leave: number;
+      percentage: number;
+    }[];
+  }> => {
+    const { student, enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    if (!enrollment) {
+      return {
+        student,
+        totalDays: 0,
+        presentDays: 0,
+        absentDays: 0,
+        lateDays: 0,
+        leaveDays: 0,
+        attendancePercentage: 0,
+        records: [],
+        monthlySummary: [],
+      };
+    }
+
+    const allRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
+
+    // Monthly aggregation
+    const monthMap = new Map<string, { total: number; present: number; absent: number; late: number; leave: number }>();
+    allRecords.forEach((r) => {
+      const m = r.date.substring(0, 7); // 'YYYY-MM'
+      const curr = monthMap.get(m) || { total: 0, present: 0, absent: 0, late: 0, leave: 0 };
+      curr.total++;
+      if (r.status === 'Present') curr.present++;
+      else if (r.status === 'Late') curr.late++;
+      else if (r.status === 'Absent') curr.absent++;
+      else if (r.status === 'Leave') curr.leave++;
+      monthMap.set(m, curr);
+    });
+
+    const monthlySummary = Array.from(monthMap.entries())
+      .map(([month, counts]) => {
+        const attended = counts.present + counts.late;
+        const percentage = counts.total > 0 ? Math.round((attended / counts.total) * 1000) / 10 : 0;
+        return {
+          month,
+          ...counts,
+          percentage,
+        };
+      })
+      .sort((a, b) => b.month.localeCompare(a.month));
+
+    // Filter records if month requested
+    const filteredRecords =
+      filters?.month && filters.month !== 'all'
+        ? allRecords.filter((r) => r.date.startsWith(filters.month!))
+        : allRecords;
+
+    const presentDays = filteredRecords.filter((r) => r.status === 'Present').length;
+    const lateDays = filteredRecords.filter((r) => r.status === 'Late').length;
+    const absentDays = filteredRecords.filter((r) => r.status === 'Absent').length;
+    const leaveDays = filteredRecords.filter((r) => r.status === 'Leave').length;
+    const totalDays = filteredRecords.length;
+    const attendancePercentage =
+      totalDays > 0 ? Math.round(((presentDays + lateDays) / totalDays) * 1000) / 10 : 0;
+
+    return {
+      student,
+      enrollment,
+      totalDays,
+      presentDays,
+      absentDays,
+      lateDays,
+      leaveDays,
+      attendancePercentage,
+      records: filteredRecords,
+      monthlySummary,
+    };
+  },
+
+  getMyExamResults: async (
+    profileId: string
+  ): Promise<{
+    student: Student;
+    enrollment?: Enrollment;
+    exams: {
+      exam: Exam;
+      reportCard: {
+        subjectResults: {
+          subjectName: string;
+          subjectCode: string;
+          maxMarks: number;
+          passingMarks: number;
+          marksObtained: number;
+          isAbsent: boolean;
+          percentage: number;
+          isPassed: boolean;
+          remarks: string;
+        }[];
+        totalMaxMarks: number;
+        totalMarksObtained: number;
+        overallPercentage: number;
+        grade: string;
+        gpa: number;
+        remarks: string;
+        status: 'Passed' | 'Needs Attention';
+      };
+    }[];
+  }> => {
+    const { student, enrollment } = await studentPortalApi.getStudentSelf(profileId);
+    if (!enrollment) {
+      return { student, exams: [] };
+    }
+
+    const allExams = await examApi.getExams(enrollment.academic_session_id);
+    const publishedExams = allExams.filter((e) => e.status === 'Published');
+
+    const examsWithResults = await Promise.all(
+      publishedExams.map(async (exam) => {
+        try {
+          const report = await examApi.getStudentReportCardData(enrollment.id, exam.id);
+          const gradeInfo = calculateGrade(report.overallPercentage);
+          const allPassed =
+            report.subjectResults.length > 0 && report.subjectResults.every((s: any) => s.isPassed);
+
+          return {
+            exam,
+            reportCard: {
+              ...report,
+              grade: gradeInfo.grade,
+              gpa: gradeInfo.gpa,
+              remarks: gradeInfo.remarks,
+              status: (allPassed ? 'Passed' : 'Needs Attention') as 'Passed' | 'Needs Attention',
+            },
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const validExams = examsWithResults.filter(
+      (e): e is NonNullable<typeof e> => e !== null && e.reportCard.subjectResults.length > 0
+    );
+
+    return {
+      student,
+      enrollment,
+      exams: validExams.sort((a, b) => b.exam.start_date.localeCompare(a.exam.start_date)),
+    };
   },
 };
 
