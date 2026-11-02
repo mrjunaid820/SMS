@@ -130,7 +130,8 @@ export const StudentDashboardPage: React.FC = () => {
           </svg>
         </div>
 
-        <div className="relative z-10 flex items-center justify-between gap-4">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Welcome Message (Left side) */}
           <div className="flex items-center gap-4">
             {/* Graduation Cap in Royal Blue Rounded Square Icon */}
             <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-blue-700 to-sky-500 text-white flex items-center justify-center shrink-0 shadow-xs ring-4 ring-blue-100 dark:ring-blue-950/60">
@@ -147,16 +148,43 @@ export const StudentDashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Session Pill on Right */}
-          <div className="hidden md:flex flex-col items-end text-right">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 bg-blue-100/70 dark:bg-blue-950/60 px-3 py-1 rounded-full border border-blue-200 dark:border-blue-900/60">
-              Session {currentSessionName}
-            </span>
-            {enrollment?.section && (
-              <span className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Class {enrollment.section?.class?.name || '9'} - {enrollment.section?.name || 'A'}
-              </span>
-            )}
+          {/* Dedicated Student Information Card (Right side on Desktop, Stacks on Mobile) */}
+          <div className="w-full md:w-auto shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-3.5 shadow-2xs min-w-[260px] md:max-w-xs">
+            <div className="space-y-1.5 text-xs">
+              {/* Row 1: Admission Number */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Admission No:
+                </span>
+                <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                  {student.admission_no || 'Not assigned'}
+                </span>
+              </div>
+
+              {/* Row 2: Class & Section */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Class & Section:
+                </span>
+                <span className="font-bold text-slate-900 dark:text-slate-100 truncate text-right">
+                  {enrollment?.section
+                    ? `${enrollment.section?.class?.name || 'Class'} - ${enrollment.section?.name || 'Sec'}`
+                    : 'Not assigned'}
+                </span>
+              </div>
+
+              {/* Row 3: Roll Number */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Roll Number:
+                </span>
+                <span className="font-mono font-extrabold text-blue-600 dark:text-blue-400">
+                  {enrollment?.roll_no !== undefined && enrollment?.roll_no !== null && enrollment?.roll_no !== ''
+                    ? `#${enrollment.roll_no}`
+                    : 'Not assigned'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

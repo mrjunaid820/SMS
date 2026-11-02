@@ -162,5 +162,27 @@ describe('Student Portal Dashboard Redesign & Scoping Suite', () => {
         studentPortalApi.getMyDashboardStats('invalid-profile-uuid-999')
       ).rejects.toThrow('No student record is linked to this user profile.');
     });
+
+    it('verifies StudentDashboardPage welcome banner includes dedicated student details card with contrast styling', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const dashboardPath = path.resolve(__dirname, '../src/pages/StudentPortal/StudentDashboardPage.tsx');
+      expect(fs.existsSync(dashboardPath)).toBe(true);
+      const content = fs.readFileSync(dashboardPath, 'utf8');
+
+      // Solid opaque card styling
+      expect(content).toContain('bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800');
+      
+      // Fields present in welcome banner
+      expect(content).toContain('Admission No:');
+      expect(content).toContain('Class & Section:');
+      expect(content).toContain('Roll Number:');
+
+      // Values and safe fallbacks
+      expect(content).toContain("student.admission_no || 'Not assigned'");
+      expect(content).toContain("'Not assigned'");
+      expect(content).toContain('enrollment.section?.class?.name');
+      expect(content).toContain('enrollment?.roll_no');
+    });
   });
 });
