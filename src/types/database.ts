@@ -45,13 +45,32 @@ export interface Section {
 export interface Subject {
   id: string;
   name: string;
-  code: string;
+  code?: string;
   class_id?: string;
+  description?: string;
   is_elective: boolean;
   credit_hours: number;
+  is_active?: boolean;
+  status?: 'Active' | 'Inactive';
   created_at: string;
   // joined fields
   class?: ClassLevel;
+}
+
+export interface SubjectDependencySummary {
+  canDelete: boolean;
+  reason?: string;
+  subjectId: string;
+  subjectName: string;
+  dependencies: {
+    teacherAssignments: number;
+    examSubjects: number;
+    marks: number;
+    quizzes: number;
+    quizMarks: number;
+    dailyDiaries: number;
+    total: number;
+  };
 }
 
 export interface Teacher {

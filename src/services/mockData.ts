@@ -93,14 +93,14 @@ export const INITIAL_SECTIONS: Section[] = [
 ];
 
 export const INITIAL_SUBJECTS: Subject[] = [
-  { id: 'e0000000-0000-0000-0000-000000000001', name: 'English Compulsory', code: 'ENG-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000002', name: 'Urdu Compulsory', code: 'URD-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000003', name: 'Islamiyat Compulsory', code: 'ISL-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 3, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000004', name: 'Mathematics Science', code: 'MTH-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000005', name: 'Physics Theory & Practical', code: 'PHY-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 5, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000006', name: 'Chemistry', code: 'CHM-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 5, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000007', name: 'Biology', code: 'BIO-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: true, credit_hours: 5, created_at: '2025-01-01T00:00:00Z' },
-  { id: 'e0000000-0000-0000-0000-000000000008', name: 'Computer Science', code: 'CSC-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: true, credit_hours: 5, created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000001', name: 'English Compulsory', code: 'ENG-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, is_active: true, status: 'Active', description: 'Core English language, grammar, and literature curriculum', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000002', name: 'Urdu Compulsory', code: 'URD-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, is_active: true, status: 'Active', description: 'National language curriculum, poetry, prose, and composition', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000003', name: 'Islamiyat Compulsory', code: 'ISL-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 3, is_active: true, status: 'Active', description: 'Islamic studies, Quranic translation, Hadith, and ethics', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000004', name: 'Mathematics Science', code: 'MTH-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 6, is_active: true, status: 'Active', description: 'Algebra, geometry, trigonometry, and analytical problem solving', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000005', name: 'Physics Theory & Practical', code: 'PHY-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 5, is_active: true, status: 'Active', description: 'Mechanics, heat, optics, and laboratory experimental work', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000006', name: 'Chemistry', code: 'CHM-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: false, credit_hours: 5, is_active: true, status: 'Active', description: 'Atomic structure, chemical bonding, reactions, and periodic trends', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000007', name: 'Biology', code: 'BIO-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: true, credit_hours: 5, is_active: true, status: 'Active', description: 'Cell biology, human physiology, biodiversity, and ecology', created_at: '2025-01-01T00:00:00Z' },
+  { id: 'e0000000-0000-0000-0000-000000000008', name: 'Computer Science', code: 'CSC-09', class_id: 'c0000000-0000-0000-0000-000000000004', is_elective: true, credit_hours: 5, is_active: true, status: 'Active', description: 'Fundamentals of computing, programming, and algorithms', created_at: '2025-01-01T00:00:00Z' },
 ];
 
 export const INITIAL_PROFILES: Profile[] = [

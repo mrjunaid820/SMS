@@ -6,6 +6,7 @@ import {
   ClassLevel,
   Section,
   Subject,
+  SubjectDependencySummary,
   Teacher,
   TeacherAssignment,
   Student,
@@ -302,12 +303,20 @@ export const academicStructureApi = {
   getSubjects: async (): Promise<Subject[]> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('subjects').select('*, class:classes(*)').order('name');
-      if (!error && data && data.length > 0) return data;
+      if (!error && data && data.length > 0) {
+        return data.map((sub: any) => ({
+          ...sub,
+          is_active: sub.is_active !== undefined ? sub.is_active : true,
+          status: sub.status || (sub.is_active === false ? 'Inactive' : 'Active'),
+        }));
+      }
     }
     const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
     const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
     return subjects.map(sub => ({
       ...sub,
+      is_active: sub.is_active !== undefined ? sub.is_active : true,
+      status: sub.status || (sub.is_active === false ? 'Inactive' : 'Active'),
       class: classes.find(c => c.id === sub.class_id),
     }));
   },
@@ -316,15 +325,216 @@ export const academicStructureApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to manage subjects.');
     }
+    const fallbackCode = `${(subj.name.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase() || 'SUB')}-${Math.floor(100 + Math.random() * 900)}`;
+    const cleanCode = subj.code?.trim() || fallbackCode;
+    const isActive = subj.is_active !== undefined ? subj.is_active : true;
+    const statusVal = subj.status || (isActive ? 'Active' : 'Inactive');
+    const payload = {
+      ...subj,
+      code: cleanCode,
+      description: subj.description?.trim() || undefined,
+      is_active: isActive,
+      status: statusVal,
+    };
+
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('subjects').insert([subj]).select('*, class:classes(*)').single();
+      const { data, error } = await supabase.from('subjects').insert([payload]).select('*, class:classes(*)').single();
       if (error) throw error;
-      return data;
+      await logAudit(actor || { role: 'admin' }, 'SUBJECT_CREATED', 'subjects', data.id, { name: data.name, code: data.code, class_id: data.class_id });
+      return {
+        ...data,
+        is_active: data.is_active !== undefined ? data.is_active : true,
+        status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
+      };
     }
     const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
-    const newSubj: Subject = { ...subj, id: generateUUID(), created_at: new Date().toISOString() };
+    const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
+    const newSubj: Subject = {
+      ...payload,
+      id: generateUUID(),
+      created_at: new Date().toISOString(),
+      class: classes.find(c => c.id === payload.class_id),
+    };
     setStorage('subjects', [...subjects, newSubj]);
+    await logAudit(actor || { role: 'admin' }, 'SUBJECT_CREATED', 'subjects', newSubj.id, { name: newSubj.name, code: newSubj.code, class_id: newSubj.class_id });
     return newSubj;
+  },
+
+  updateSubject: async (id: string, updates: Partial<Subject>, actor?: { id?: string; name?: string; role?: string }): Promise<Subject> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to manage subjects.');
+    }
+    let isActive = updates.is_active;
+    let statusVal = updates.status;
+    if (isActive !== undefined && !statusVal) {
+      statusVal = isActive ? 'Active' : 'Inactive';
+    } else if (statusVal && isActive === undefined) {
+      isActive = statusVal === 'Active';
+    }
+
+    const cleanedUpdates: Partial<Subject> = {
+      ...updates,
+      ...(isActive !== undefined ? { is_active: isActive } : {}),
+      ...(statusVal ? { status: statusVal } : {}),
+      ...(updates.description !== undefined ? { description: updates.description.trim() } : {}),
+      ...(updates.name ? { name: updates.name.trim() } : {}),
+      ...(updates.code !== undefined ? { code: updates.code.trim() } : {}),
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('subjects').update(cleanedUpdates).eq('id', id).select('*, class:classes(*)').single();
+      if (error) throw error;
+      await logAudit(actor || { role: 'admin' }, 'SUBJECT_UPDATED', 'subjects', id, cleanedUpdates);
+      return {
+        ...data,
+        is_active: data.is_active !== undefined ? data.is_active : true,
+        status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
+      };
+    }
+
+    const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
+    const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
+    const index = subjects.findIndex(s => s.id === id);
+    if (index === -1) {
+      throw new Error('Subject not found.');
+    }
+
+    const updated: Subject = {
+      ...subjects[index],
+      ...cleanedUpdates,
+      is_active: isActive !== undefined ? isActive : subjects[index].is_active !== undefined ? subjects[index].is_active : true,
+      status: statusVal || subjects[index].status || 'Active',
+      class: cleanedUpdates.class_id
+        ? classes.find(c => c.id === cleanedUpdates.class_id)
+        : (subjects[index].class || classes.find(c => c.id === subjects[index].class_id)),
+    };
+    subjects[index] = updated;
+    setStorage('subjects', [...subjects]);
+    await logAudit(actor || { role: 'admin' }, 'SUBJECT_UPDATED', 'subjects', id, cleanedUpdates);
+    return updated;
+  },
+
+  checkSubjectDependencies: async (id: string): Promise<SubjectDependencySummary> => {
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.rpc('admin_check_subject_deletion_eligibility', { p_subject_id: id });
+        if (!error && data) {
+          return {
+            canDelete: data.can_delete,
+            reason: data.reason,
+            subjectId: data.subject_id,
+            subjectName: data.subject_name,
+            dependencies: {
+              teacherAssignments: data.dependencies.teacher_assignments,
+              examSubjects: data.dependencies.exam_subjects,
+              marks: data.dependencies.marks,
+              quizzes: data.dependencies.quizzes,
+              quizMarks: data.dependencies.quiz_marks,
+              dailyDiaries: data.dependencies.daily_diaries,
+              total: data.dependencies.total,
+            },
+          };
+        }
+      } catch (e) {
+        console.warn('Supabase checkSubjectDependencies RPC failed, falling back to client query', e);
+      }
+    }
+
+    // Storage fallback or local check
+    const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
+    const targetSubject = subjects.find(s => s.id === id);
+    const subjectName = targetSubject ? targetSubject.name : 'Unknown Subject';
+
+    const assignments = getStorage<TeacherAssignment[]>('assignments', INITIAL_ASSIGNMENTS);
+    const teacherAssignmentsCount = assignments.filter(a => a.subject_id === id).length;
+
+    const examSubjects = getStorage<ExamSubject[]>('exam_subjects', INITIAL_EXAM_SUBJECTS);
+    const matchingExamSubjects = examSubjects.filter(es => es.subject_id === id);
+    const examSubjectsCount = matchingExamSubjects.length;
+    const matchingExamSubjectIds = matchingExamSubjects.map(es => es.id);
+
+    const marks = getStorage<Mark[]>('marks', INITIAL_MARKS);
+    const marksCount = marks.filter(m => matchingExamSubjectIds.includes(m.exam_subject_id)).length;
+
+    const quizzes = getStorage<Quiz[]>('quizzes', INITIAL_QUIZZES);
+    const matchingQuizzes = quizzes.filter(q => q.subject_id === id);
+    const quizzesCount = matchingQuizzes.length;
+    const matchingQuizIds = matchingQuizzes.map(q => q.id);
+
+    const quizMarks = getStorage<QuizMark[]>('quiz_marks', INITIAL_QUIZ_MARKS);
+    const quizMarksCount = quizMarks.filter(qm => matchingQuizIds.includes(qm.quiz_id)).length;
+
+    const dailyDiaries = getStorage<DailyDiary[]>('daily_diaries', INITIAL_DAILY_DIARIES);
+    const dailyDiariesCount = dailyDiaries.filter(d => d.subject_id === id).length;
+
+    const total = teacherAssignmentsCount + examSubjectsCount + marksCount + quizzesCount + quizMarksCount + dailyDiariesCount;
+    const canDelete = total === 0;
+
+    let reason: string | undefined = undefined;
+    if (!canDelete) {
+      const details: string[] = [];
+      if (teacherAssignmentsCount > 0) details.push(`${teacherAssignmentsCount} Teacher Assignment(s)`);
+      if (examSubjectsCount > 0) details.push(`${examSubjectsCount} Examination Schedule(s)`);
+      if (marksCount > 0) details.push(`${marksCount} Student Exam Mark(s)`);
+      if (quizzesCount > 0) details.push(`${quizzesCount} Quiz(zes)`);
+      if (quizMarksCount > 0) details.push(`${quizMarksCount} Quiz Mark(s)`);
+      if (dailyDiariesCount > 0) details.push(`${dailyDiariesCount} Daily Diary Entry/Entries`);
+
+      reason = `Cannot permanently delete "${subjectName}" because it is actively linked to institutional records (${details.join(', ')}). Deleting it would compromise academic history. Please deactivate or archive this subject instead.`;
+    }
+
+    return {
+      canDelete,
+      reason,
+      subjectId: id,
+      subjectName,
+      dependencies: {
+        teacherAssignments: teacherAssignmentsCount,
+        examSubjects: examSubjectsCount,
+        marks: marksCount,
+        quizzes: quizzesCount,
+        quizMarks: quizMarksCount,
+        dailyDiaries: dailyDiariesCount,
+        total,
+      },
+    };
+  },
+
+  deleteSubject: async (id: string, actor?: { id?: string; name?: string; role?: string }): Promise<{ success: boolean; message: string }> => {
+    if (actor?.role && actor.role !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to delete subjects.');
+    }
+
+    const check = await academicStructureApi.checkSubjectDependencies(id);
+    if (!check.canDelete) {
+      throw new Error(check.reason || 'Subject cannot be deleted due to existing academic records.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase.rpc('admin_safe_delete_subject', { p_subject_id: id });
+        if (!error && data?.success) {
+          await logAudit(actor || { role: 'admin' }, 'SUBJECT_DELETED', 'subjects', id, { subjectName: check.subjectName });
+          return { success: true, message: data.message };
+        }
+        if (error) throw error;
+      } catch (err: any) {
+        const { error: delError } = await supabase.from('subjects').delete().eq('id', id);
+        if (delError) throw delError;
+      }
+      await logAudit(actor || { role: 'admin' }, 'SUBJECT_DELETED', 'subjects', id, { subjectName: check.subjectName });
+      return { success: true, message: `Subject "${check.subjectName}" deleted successfully.` };
+    }
+
+    const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
+    const filtered = subjects.filter(s => s.id !== id);
+    setStorage('subjects', filtered);
+    await logAudit(actor || { role: 'admin' }, 'SUBJECT_DELETED', 'subjects', id, { subjectName: check.subjectName });
+    return { success: true, message: `Subject "${check.subjectName}" was successfully removed.` };
+  },
+
+  setSubjectStatus: async (id: string, isActive: boolean, actor?: { id?: string; name?: string; role?: string }): Promise<Subject> => {
+    return academicStructureApi.updateSubject(id, { is_active: isActive, status: isActive ? 'Active' : 'Inactive' }, actor);
   },
 };
 

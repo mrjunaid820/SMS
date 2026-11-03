@@ -52,7 +52,7 @@ interface GroupedClassSection {
   sectionName: string;
   displayName: string; // e.g. "Class 9 - A"
   studentCount: number;
-  subjects: { id: string; name: string; code: string }[];
+  subjects: { id: string; name: string; code?: string }[];
   isClassTeacher: boolean;
   todayAttendanceMarked: boolean;
   todayPresentCount: number;
@@ -217,7 +217,7 @@ export const TeacherDashboardPage: React.FC = () => {
         existing.subjects.push({
           id: asgn.subject.id,
           name: asgn.subject.name,
-          code: asgn.subject.code,
+          code: asgn.subject.code || '',
         });
       }
     });
