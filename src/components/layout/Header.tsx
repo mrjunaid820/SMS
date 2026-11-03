@@ -25,7 +25,7 @@ import {
   X,
   Award,
 } from 'lucide-react';
-import { announcementApi, studentApi, teacherApi, academicStructureApi, feeApi } from '@/services/api';
+import { announcementApi, studentApi, teacherApi, academicStructureApi, feeApi, complaintApi } from '@/services/api';
 import { SchoolAnnouncement, Student, Teacher, ClassLevel, FeeInvoice } from '@/types/database';
 import { formatDate } from '@/lib/utils';
 
@@ -74,10 +74,51 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
   const loadNotifications = async () => {
     if (!user) return;
     try {
-      const items = await announcementApi.getAnnouncements(
+      let items = await announcementApi.getAnnouncements(
         { status: 'published' },
         { id: user.id, role, email: user.email }
       );
+
+      // Check complaint alerts (Strictly Admin and Student only; NEVER teachers)
+      if (role === 'admin') {
+        try {
+          const pendingComplaints = await complaintApi.getComplaints({ status: 'Submitted' }, { role: 'admin' });
+          const complaintNotifs: SchoolAnnouncement[] = pendingComplaints.slice(0, 3).map((c) => ({
+            id: `notif-${c.id}`,
+            title: `Complaint: ${c.complaint_reference} (${c.student?.full_name || 'Student'})`,
+            content: `${c.category}: ${c.subject}`,
+            category: 'emergency',
+            target_audience: 'all',
+            is_pinned: true,
+            status: 'published',
+            publish_date: c.created_at.split('T')[0],
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+            is_read: false,
+          }));
+          items = [...complaintNotifs, ...items];
+        } catch {}
+      } else if (role === 'student') {
+        try {
+          const myComplaints = await complaintApi.getMyComplaints(user.id || user.email || '');
+          const answered = myComplaints.filter((c) => c.status === 'Resolved' || c.status === 'Under Review' || Boolean(c.admin_response));
+          const complaintNotifs: SchoolAnnouncement[] = answered.slice(0, 2).map((c) => ({
+            id: `notif-${c.id}`,
+            title: `Complaint Update: ${c.complaint_reference} is ${c.status}`,
+            content: c.admin_response || c.subject,
+            category: 'result',
+            target_audience: 'students',
+            is_pinned: true,
+            status: 'published',
+            publish_date: c.updated_at.split('T')[0],
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+            is_read: false,
+          }));
+          items = [...complaintNotifs, ...items];
+        } catch {}
+      }
+
       setNotifications(items.slice(0, 5));
       const unread = items.filter((a) => !a.is_read).length;
       setUnreadCount(unread > 0 ? unread : 3); // realistic indicator if demo
@@ -306,6 +347,11 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
   };
 
   const handleOpenNotice = async (n: SchoolAnnouncement) => {
+    if (n.id.startsWith('notif-') || n.title.includes('Complaint')) {
+      setIsNotifOpen(false);
+      navigate(role === 'admin' ? '/student-complaints' : '/my-complaints');
+      return;
+    }
     if (user && !n.is_read) {
       await announcementApi.markAsRead(n.id, user.id);
     }

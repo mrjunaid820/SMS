@@ -534,3 +534,92 @@ export interface AnnouncementRead {
   read_at: string;
 }
 
+// -------------------------------------------------------------
+// STUDENT COMPLAINTS & FEEDBACK MODULE
+// -------------------------------------------------------------
+export type ComplaintCategory =
+  | 'Teacher-related Complaint'
+  | 'Classroom Issue'
+  | 'Academic Issue'
+  | 'Examination Issue'
+  | 'Fee-related Issue'
+  | 'School Facilities'
+  | 'Discipline Issue'
+  | 'Bullying or Harassment'
+  | 'Transport Issue'
+  | 'Other';
+
+export type ComplaintStatus =
+  | 'Submitted'
+  | 'Under Review'
+  | 'In Progress'
+  | 'Resolved'
+  | 'Rejected';
+
+export interface StudentComplaintNote {
+  id: string;
+  complaint_id: string;
+  admin_id?: string;
+  admin_name: string;
+  note: string;
+  created_at: string;
+}
+
+export interface StudentComplaintHistoryItem {
+  id: string;
+  complaint_id: string;
+  action: string;
+  status: ComplaintStatus;
+  comment?: string;
+  is_internal: boolean;
+  performed_by?: string;
+  performed_by_name?: string;
+  created_at: string;
+}
+
+export interface StudentComplaint {
+  id: string;
+  complaint_reference: string;
+  student_id: string;
+  subject: string;
+  category: ComplaintCategory;
+  description: string;
+  attachment_path?: string;
+  attachment_name?: string;
+  status: ComplaintStatus;
+  admin_response?: string;
+  rejection_reason?: string;
+  internal_notes?: string; // Internal admin note (hidden from students)
+  reviewed_by?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+  // joined relations
+  student?: Student & {
+    enrollment?: Enrollment & {
+      section?: Section & { class?: ClassLevel };
+    };
+  };
+  reviewer?: Profile;
+  notes?: StudentComplaintNote[];
+  history?: StudentComplaintHistoryItem[];
+}
+
+export interface CreateComplaintInput {
+  subject: string;
+  category: ComplaintCategory;
+  description: string;
+  attachment_path?: string;
+  attachment_name?: string;
+}
+
+export interface ComplaintSummaryStats {
+  total: number;
+  submitted: number;
+  underReview: number;
+  inProgress: number;
+  resolved: number;
+  rejected: number;
+}
+
+

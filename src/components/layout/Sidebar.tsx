@@ -24,6 +24,7 @@ import {
   Search,
   CreditCard,
   Megaphone,
+  MessageSquareWarning,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -52,6 +53,7 @@ const iconMap: Record<string, React.ReactNode> = {
   Sliders: <Sliders className="w-4 h-4 shrink-0" />,
   UserCog: <UserCog className="w-4 h-4 shrink-0" />,
   Megaphone: <Megaphone className="w-4 h-4 shrink-0" />,
+  MessageSquareWarning: <MessageSquareWarning className="w-4 h-4 shrink-0" />,
   Activity: <Activity className="w-4 h-4 shrink-0" />,
 };
 
@@ -81,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
     if (['/examinations', '/results-report-cards'].includes(p)) {
       setIsExamOpen(true);
     }
-    if (['/events-announcements'].includes(p)) {
+    if (['/events-announcements', '/student-complaints'].includes(p)) {
       setIsCommOpen(true);
     }
     if (['/school-settings', '/academic-sessions', '/quick-search', '/audit-logs', '/users-roles', '/server-database'].includes(p)) {
@@ -91,7 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
 
   const isAcademicActive = ['/students', '/teachers', '/classes-sections', '/subjects', '/teacher-assignments', '/quiz-marks', '/daily-diary'].includes(location.pathname);
   const isExamActive = ['/examinations', '/results-report-cards'].includes(location.pathname);
-  const isCommActive = ['/events-announcements'].includes(location.pathname);
+  const isCommActive = ['/events-announcements', '/student-complaints'].includes(location.pathname);
   const isSettingsActive = ['/school-settings', '/academic-sessions', '/quick-search', '/audit-logs', '/users-roles', '/server-database'].includes(location.pathname);
   const isDashboardActive = location.pathname === '/dashboard' || location.pathname === '/admin-dashboard' || location.pathname === '/teacher-dashboard';
 
@@ -432,6 +434,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
                   >
                     <Megaphone className="w-3.5 h-3.5" />
                     <span>Events & Notices</span>
+                  </NavLink>
+                  <NavLink
+                    to="/student-complaints"
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors',
+                        isActive
+                          ? 'bg-blue-600 text-white font-medium shadow-xs'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-[#142346]/80'
+                      )
+                    }
+                  >
+                    <MessageSquareWarning className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Student Complaints</span>
                   </NavLink>
                 </div>
               )}

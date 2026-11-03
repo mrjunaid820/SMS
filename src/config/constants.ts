@@ -104,4 +104,5 @@ export const STUDENT_PORTAL_NAV_ITEMS: NavItemConfig[] = [
   { id: 'my-fees', label: 'Fees & Dues', path: '/my-fees', iconName: 'Receipt', category: 'finance' },
   { id: 'my-daily-diary', label: 'Daily Diary', path: '/my-daily-diary', iconName: 'ClipboardCheck', category: 'academic' },
   { id: 'my-announcements', label: 'Announcements', path: '/my-announcements', iconName: 'Megaphone', category: 'core' },
+  { id: 'my-complaints', label: 'Complaints & Feedback', path: '/my-complaints', iconName: 'MessageSquareWarning', category: 'core' },
 ];

@@ -12,9 +12,9 @@ describe('Student Portal Dashboard Redesign & Scoping Suite', () => {
   // 1. STUDENT NAVIGATION SIDEBAR INTEGRITY (Phase 3 Visual Reference)
   // -------------------------------------------------------------
   describe('1. Student Navigation Sidebar Structure', () => {
-    it('provides exactly 8 dedicated student navigation items matching the visual reference', () => {
+    it('provides dedicated student navigation items matching the visual reference and complaints portal', () => {
       expect(STUDENT_PORTAL_NAV_ITEMS).toBeDefined();
-      expect(STUDENT_PORTAL_NAV_ITEMS.length).toBe(8);
+      expect(STUDENT_PORTAL_NAV_ITEMS.length).toBe(9);
 
       const labels = STUDENT_PORTAL_NAV_ITEMS.map((item) => item.label);
       expect(labels).toEqual([
@@ -26,6 +26,7 @@ describe('Student Portal Dashboard Redesign & Scoping Suite', () => {
         'Fees & Dues',
         'Daily Diary',
         'Announcements',
+        'Complaints & Feedback',
       ]);
     });
 

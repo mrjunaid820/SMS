@@ -39,6 +39,13 @@ import {
   EventCategory,
   EventStatus,
   AnnouncementRead,
+  StudentComplaint,
+  StudentComplaintNote,
+  StudentComplaintHistoryItem,
+  ComplaintCategory,
+  ComplaintStatus,
+  CreateComplaintInput,
+  ComplaintSummaryStats,
 } from '@/types/database';
 import {
   INITIAL_SCHOOL_SETTINGS,
@@ -64,6 +71,9 @@ import {
   INITIAL_DAILY_DIARIES,
   INITIAL_ANNOUNCEMENTS,
   INITIAL_EVENTS,
+  INITIAL_COMPLAINTS,
+  INITIAL_COMPLAINT_NOTES,
+  INITIAL_COMPLAINT_HISTORY,
 } from './mockData';
 import { generateUUID, calculateGrade, calculateAttendancePercentage } from '@/lib/utils';
 
@@ -6439,6 +6449,483 @@ export const eventApi = {
     return events.slice(0, limit);
   },
 };
+
+// -------------------------------------------------------------
+// STUDENT COMPLAINTS & FEEDBACK MODULE (Strict Admin-Only & Student Scoped)
+// -------------------------------------------------------------
+export const complaintApi = {
+  getComplaints: async (
+    filters?: {
+      status?: ComplaintStatus;
+      category?: ComplaintCategory;
+      search?: string;
+      studentId?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<StudentComplaint[]> => {
+    // CRITICAL SECURITY CHECK: Teachers have ZERO access to complaints
+    if (actor?.role === 'teacher') {
+      throw new Error('Access denied: Teachers are strictly unauthorized to view student complaints.');
+    }
+
+    let studentScopedId = filters?.studentId;
+
+    // If actor is student, scope to their own student ID exclusively
+    if (actor?.role === 'student') {
+      try {
+        const studentInfo = await studentPortalApi.getStudentSelf(
+          actor.id || actor.email || filters?.studentId || ''
+        );
+        studentScopedId = studentInfo.student.id;
+      } catch (err: any) {
+        throw new Error('Access denied: No student record associated with authenticated session.');
+      }
+    }
+
+    let complaints: StudentComplaint[] = [];
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        let q = supabase
+          .from('student_complaints')
+          .select('*, student:students(*), reviewer:profiles(*)');
+
+        if (studentScopedId) {
+          q = q.eq('student_id', studentScopedId);
+        }
+        if (filters?.status) {
+          q = q.eq('status', filters.status);
+        }
+        if (filters?.category) {
+          q = q.eq('category', filters.category);
+        }
+        if (filters?.startDate) {
+          q = q.gte('created_at', filters.startDate);
+        }
+        if (filters?.endDate) {
+          q = q.lte('created_at', filters.endDate);
+        }
+
+        q = q.order('created_at', { ascending: false });
+
+        const { data, error } = await q;
+        if (!error && data) {
+          complaints = data;
+        }
+      } catch (err: any) {
+        if (!err.message?.includes('Could not find the table') && !err.message?.includes('relation "student_complaints" does not exist')) {
+          console.warn('Supabase getComplaints failed, falling back to local storage', err);
+        }
+      }
+    }
+
+    // Fallback or local storage merge
+    if (complaints.length === 0) {
+      complaints = getStorage<StudentComplaint[]>('student_complaints', INITIAL_COMPLAINTS);
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      const enrollments = getStorage<Enrollment[]>('enrollments', INITIAL_ENROLLMENTS);
+      const sections = getStorage<Section[]>('sections', INITIAL_SECTIONS);
+      const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
+      const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+
+      // Hydrate relations
+      complaints = complaints.map((c) => {
+        const st = students.find((s) => s.id === c.student_id);
+        const en = enrollments.find((e) => e.student_id === c.student_id && e.status === 'active') || enrollments.find((e) => e.student_id === c.student_id);
+        const sec = en ? sections.find((s) => s.id === en.section_id) : undefined;
+        const cls = sec ? classes.find((cl) => cl.id === sec.class_id) : undefined;
+        const rev = c.reviewed_by ? profiles.find((p) => p.id === c.reviewed_by) : undefined;
+
+        return {
+          ...c,
+          student: st
+            ? {
+                ...st,
+                enrollment: en
+                  ? {
+                      ...en,
+                      section: sec ? { ...sec, class: cls } : undefined,
+                    }
+                  : undefined,
+              }
+            : undefined,
+          reviewer: rev,
+        };
+      });
+
+      // Apply filtering
+      if (studentScopedId) {
+        complaints = complaints.filter((c) => c.student_id === studentScopedId);
+      }
+      if (filters?.status) {
+        complaints = complaints.filter((c) => c.status === filters.status);
+      }
+      if (filters?.category) {
+        complaints = complaints.filter((c) => c.category === filters.category);
+      }
+      if (filters?.startDate) {
+        complaints = complaints.filter((c) => c.created_at >= filters.startDate!);
+      }
+      if (filters?.endDate) {
+        complaints = complaints.filter((c) => c.created_at <= filters.endDate!);
+      }
+    }
+
+    // Search query filtering
+    if (filters?.search && filters.search.trim()) {
+      const term = filters.search.trim().toLowerCase();
+      complaints = complaints.filter((c) => {
+        const refMatch = c.complaint_reference?.toLowerCase().includes(term);
+        const subjMatch = c.subject?.toLowerCase().includes(term);
+        const catMatch = c.category?.toLowerCase().includes(term);
+        const nameMatch = c.student?.full_name?.toLowerCase().includes(term);
+        const admMatch = c.student?.admission_no?.toLowerCase().includes(term);
+        return refMatch || subjMatch || catMatch || nameMatch || admMatch;
+      });
+    }
+
+    // Load notes & history
+    const allNotes = getStorage<StudentComplaintNote[]>('student_complaint_notes', INITIAL_COMPLAINT_NOTES);
+    const allHistory = getStorage<StudentComplaintHistoryItem[]>('student_complaint_history', INITIAL_COMPLAINT_HISTORY);
+
+    // Final security sanitization before returning
+    return complaints.map((c) => {
+      const cNotes = allNotes.filter((n) => n.complaint_id === c.id);
+      let cHistory = allHistory.filter((h) => h.complaint_id === c.id);
+
+      if (actor?.role === 'student') {
+        // Strip internal notes and internal history records for students
+        cHistory = cHistory.filter((h) => !h.is_internal);
+        const { internal_notes, ...safeComplaint } = c;
+        return {
+          ...safeComplaint,
+          notes: [], // Students never receive internal notes
+          history: cHistory,
+        };
+      }
+
+      // Admins receive full notes and history
+      return {
+        ...c,
+        notes: cNotes,
+        history: cHistory,
+      };
+    });
+  },
+
+  getMyComplaints: async (profileOrEmail: string): Promise<StudentComplaint[]> => {
+    const studentInfo = await studentPortalApi.getStudentSelf(profileOrEmail);
+    return complaintApi.getComplaints(
+      { studentId: studentInfo.student.id },
+      { id: studentInfo.student.id, role: 'student', email: studentInfo.student.email }
+    );
+  },
+
+  getComplaintById: async (
+    id: string,
+    actor?: { id?: string; name?: string; role?: string; email?: string }
+  ): Promise<StudentComplaint> => {
+    if (actor?.role === 'teacher') {
+      throw new Error('Access denied: Teachers are strictly unauthorized to view student complaints.');
+    }
+
+    const complaints = await complaintApi.getComplaints(undefined, actor);
+    const complaint = complaints.find((c) => c.id === id);
+    if (!complaint) {
+      throw new Error('Complaint record not found.');
+    }
+
+    // Verify student ownership
+    if (actor?.role === 'student') {
+      const studentInfo = await studentPortalApi.getStudentSelf(actor.id || actor.email || '');
+      if (complaint.student_id !== studentInfo.student.id) {
+        throw new Error('Access denied: You can only view your own complaints.');
+      }
+    }
+
+    return complaint;
+  },
+
+  submitComplaint: async (
+    input: CreateComplaintInput,
+    studentProfileOrEmail: string
+  ): Promise<StudentComplaint> => {
+    const studentInfo = await studentPortalApi.getStudentSelf(studentProfileOrEmail);
+    const student = studentInfo.student;
+
+    if (!input.subject?.trim()) {
+      throw new Error('Please enter a valid complaint subject.');
+    }
+    if (!input.category) {
+      throw new Error('Please select a complaint category.');
+    }
+    if (!input.description?.trim()) {
+      throw new Error('Please enter a detailed description of your complaint.');
+    }
+
+    const currentYear = new Date().getFullYear();
+    const stored = getStorage<StudentComplaint[]>('student_complaints', INITIAL_COMPLAINTS);
+    const yearCount = stored.filter((c) => c.complaint_reference?.startsWith(`CMP-${currentYear}`)).length + 1;
+    const complaintRef = `CMP-${currentYear}-${String(yearCount).padStart(4, '0')}`;
+    const newId = generateUUID();
+    const nowIso = new Date().toISOString();
+
+    const newComplaint: StudentComplaint = {
+      id: newId,
+      complaint_reference: complaintRef,
+      student_id: student.id,
+      subject: input.subject.trim(),
+      category: input.category,
+      description: input.description.trim(),
+      attachment_path: input.attachment_path,
+      attachment_name: input.attachment_name,
+      status: 'Submitted',
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        await supabase.from('student_complaints').insert([
+          {
+            id: newId,
+            complaint_reference: complaintRef,
+            student_id: student.id,
+            subject: newComplaint.subject,
+            category: newComplaint.category,
+            description: newComplaint.description,
+            attachment_path: newComplaint.attachment_path,
+            attachment_name: newComplaint.attachment_name,
+            status: 'Submitted',
+          },
+        ]);
+      } catch (err: any) {
+        console.warn('Supabase complaint insert failed, continuing with local storage', err);
+      }
+    }
+
+    stored.unshift(newComplaint);
+    setStorage('student_complaints', stored);
+
+    // Add initial history record
+    const historyList = getStorage<StudentComplaintHistoryItem[]>('student_complaint_history', INITIAL_COMPLAINT_HISTORY);
+    historyList.push({
+      id: generateUUID(),
+      complaint_id: newId,
+      action: 'Submitted',
+      status: 'Submitted',
+      comment: 'Complaint submitted via Student Portal',
+      is_internal: false,
+      performed_by_name: student.full_name,
+      created_at: nowIso,
+    });
+    setStorage('student_complaint_history', historyList);
+
+    await logAudit(
+      { id: student.profile_id, name: student.full_name, role: 'student' },
+      'STUDENT_COMPLAINT_SUBMITTED',
+      'student_complaints',
+      newId,
+      {
+        complaint_reference: complaintRef,
+        category: input.category,
+        subject: input.subject,
+      }
+    );
+
+    return newComplaint;
+  },
+
+  updateComplaintStatus: async (
+    complaintId: string,
+    status: ComplaintStatus,
+    options: {
+      adminResponse?: string;
+      rejectionReason?: string;
+      comment?: string;
+    },
+    adminActor: { id?: string; name?: string; role?: string }
+  ): Promise<StudentComplaint> => {
+    if (adminActor?.role !== 'admin') {
+      throw new Error('Access denied: Only authorized administrators can update complaints.');
+    }
+
+    const nowIso = new Date().toISOString();
+    let updatedComplaint: StudentComplaint | null = null;
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const updatePayload: any = {
+          status,
+          updated_at: nowIso,
+          reviewed_by: adminActor.id,
+        };
+        if (options.adminResponse !== undefined) {
+          updatePayload.admin_response = options.adminResponse;
+        }
+        if (status === 'Rejected' && options.rejectionReason) {
+          updatePayload.rejection_reason = options.rejectionReason;
+        }
+        if (status === 'Resolved') {
+          updatePayload.resolved_at = nowIso;
+        }
+
+        const { data, error } = await supabase
+          .from('student_complaints')
+          .update(updatePayload)
+          .eq('id', complaintId)
+          .select()
+          .single();
+
+        if (!error && data) {
+          updatedComplaint = data;
+        }
+      } catch (err: any) {
+        console.warn('Supabase status update failed, continuing with local storage', err);
+      }
+    }
+
+    const stored = getStorage<StudentComplaint[]>('student_complaints', INITIAL_COMPLAINTS);
+    const idx = stored.findIndex((c) => c.id === complaintId);
+    if (idx === -1) {
+      throw new Error('Complaint not found.');
+    }
+
+    const current = stored[idx];
+    const updated: StudentComplaint = {
+      ...current,
+      status,
+      updated_at: nowIso,
+      reviewed_by: adminActor.id,
+      admin_response: options.adminResponse !== undefined ? options.adminResponse : current.admin_response,
+      rejection_reason: status === 'Rejected' ? options.rejectionReason : current.rejection_reason,
+      resolved_at: status === 'Resolved' ? nowIso : current.resolved_at,
+    };
+    stored[idx] = updated;
+    setStorage('student_complaints', stored);
+
+    // Add milestone to history
+    const historyList = getStorage<StudentComplaintHistoryItem[]>('student_complaint_history', INITIAL_COMPLAINT_HISTORY);
+    historyList.push({
+      id: generateUUID(),
+      complaint_id: complaintId,
+      action: status === 'Rejected' ? 'Complaint Rejected' : `Status Changed to ${status}`,
+      status,
+      comment:
+        options.comment ||
+        (status === 'Rejected' ? `Reason: ${options.rejectionReason}` : options.adminResponse) ||
+        `Status updated to ${status}`,
+      is_internal: false,
+      performed_by: adminActor.id,
+      performed_by_name: adminActor.name || 'Administrator (Principal)',
+      created_at: nowIso,
+    });
+    setStorage('student_complaint_history', historyList);
+
+    await logAudit(
+      adminActor,
+      'COMPLAINT_STATUS_UPDATED',
+      'student_complaints',
+      complaintId,
+      {
+        previous_status: current.status,
+        new_status: status,
+        has_response: Boolean(options.adminResponse),
+      }
+    );
+
+    return updatedComplaint || updated;
+  },
+
+  addAdminNote: async (
+    complaintId: string,
+    note: string,
+    adminActor: { id?: string; name?: string; role?: string }
+  ): Promise<StudentComplaintNote> => {
+    if (adminActor?.role !== 'admin') {
+      throw new Error('Access denied: Only authorized administrators can add internal notes.');
+    }
+    if (!note?.trim()) {
+      throw new Error('Note content cannot be empty.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const newNote: StudentComplaintNote = {
+      id: generateUUID(),
+      complaint_id: complaintId,
+      admin_id: adminActor.id,
+      admin_name: adminActor.name || 'Administrator (Principal)',
+      note: note.trim(),
+      created_at: nowIso,
+    };
+
+    if (isLiveSupabaseConfigured()) {
+      try {
+        await supabase.from('student_complaint_notes').insert([
+          {
+            id: newNote.id,
+            complaint_id: complaintId,
+            admin_id: adminActor.id,
+            admin_name: newNote.admin_name,
+            note: newNote.note,
+          },
+        ]);
+      } catch (err: any) {
+        console.warn('Supabase note insert failed, continuing with local storage', err);
+      }
+    }
+
+    const notesList = getStorage<StudentComplaintNote[]>('student_complaint_notes', INITIAL_COMPLAINT_NOTES);
+    notesList.push(newNote);
+    setStorage('student_complaint_notes', notesList);
+
+    // Add internal history record
+    const historyList = getStorage<StudentComplaintHistoryItem[]>('student_complaint_history', INITIAL_COMPLAINT_HISTORY);
+    historyList.push({
+      id: generateUUID(),
+      complaint_id: complaintId,
+      action: 'Internal Note Added',
+      status: 'Under Review',
+      comment: 'Internal administrative note recorded by Admin',
+      is_internal: true,
+      performed_by: adminActor.id,
+      performed_by_name: adminActor.name || 'Administrator (Principal)',
+      created_at: nowIso,
+    });
+    setStorage('student_complaint_history', historyList);
+
+    await logAudit(
+      adminActor,
+      'COMPLAINT_INTERNAL_NOTE_ADDED',
+      'student_complaint_notes',
+      newNote.id,
+      { complaint_id: complaintId }
+    );
+
+    return newNote;
+  },
+
+  getComplaintStats: async (
+    actor?: { role?: string }
+  ): Promise<ComplaintSummaryStats> => {
+    if (actor?.role === 'teacher') {
+      throw new Error('Access denied: Teachers cannot access complaint statistics.');
+    }
+
+    const all = await complaintApi.getComplaints(undefined, { role: 'admin' });
+    return {
+      total: all.length,
+      submitted: all.filter((c) => c.status === 'Submitted').length,
+      underReview: all.filter((c) => c.status === 'Under Review').length,
+      inProgress: all.filter((c) => c.status === 'In Progress').length,
+      resolved: all.filter((c) => c.status === 'Resolved').length,
+      rejected: all.filter((c) => c.status === 'Rejected').length,
+    };
+  },
+};
+
 
 
 

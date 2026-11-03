@@ -26,6 +26,7 @@ import {
   Search,
   CreditCard,
   Megaphone,
+  MessageSquareWarning,
   ChevronDown,
   LogOut,
   Activity,
@@ -51,6 +52,7 @@ const iconMap: Record<string, React.ReactNode> = {
   Sliders: <Sliders className="w-4 h-4 shrink-0" />,
   UserCog: <UserCog className="w-4 h-4 shrink-0" />,
   Megaphone: <Megaphone className="w-4 h-4 shrink-0" />,
+  MessageSquareWarning: <MessageSquareWarning className="w-4 h-4 shrink-0" />,
   Activity: <Activity className="w-4 h-4 shrink-0" />,
 };
 
@@ -77,7 +79,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
     if (['/examinations', '/results-report-cards'].includes(p)) {
       setIsExamOpen(true);
     }
-    if (['/events-announcements'].includes(p)) {
+    if (['/events-announcements', '/student-complaints'].includes(p)) {
       setIsCommOpen(true);
     }
     if (['/school-settings', '/academic-sessions', '/quick-search', '/audit-logs', '/users-roles', '/server-database'].includes(p)) {
@@ -89,7 +91,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
 
   const isAcademicActive = ['/students', '/teachers', '/classes-sections', '/subjects', '/teacher-assignments', '/quiz-marks', '/daily-diary'].includes(location.pathname);
   const isExamActive = ['/examinations', '/results-report-cards'].includes(location.pathname);
-  const isCommActive = ['/events-announcements'].includes(location.pathname);
+  const isCommActive = ['/events-announcements', '/student-complaints'].includes(location.pathname);
   const isSettingsActive = ['/school-settings', '/academic-sessions', '/quick-search', '/audit-logs', '/users-roles', '/server-database'].includes(location.pathname);
   const isDashboardActive = location.pathname === '/dashboard' || location.pathname === '/admin-dashboard' || location.pathname === '/teacher-dashboard';
 
@@ -242,6 +244,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
                   <div className="mt-1 ml-4 pl-3 border-l border-slate-700/60 space-y-1">
                     <NavLink to="/events-announcements" onClick={onClose} className={({ isActive }) => cn('flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs', isActive ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-white')}>
                       <Megaphone className="w-3.5 h-3.5" /> <span>Events & Notices</span>
+                    </NavLink>
+                    <NavLink to="/student-complaints" onClick={onClose} className={({ isActive }) => cn('flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs', isActive ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-white')}>
+                      <MessageSquareWarning className="w-3.5 h-3.5 text-amber-400" /> <span>Student Complaints</span>
                     </NavLink>
                   </div>
                 )}

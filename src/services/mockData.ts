@@ -24,6 +24,9 @@ import {
   SchoolAnnouncement,
   SchoolEvent,
   AnnouncementRead,
+  StudentComplaint,
+  StudentComplaintNote,
+  StudentComplaintHistoryItem,
 } from '@/types/database';
 
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
@@ -1021,4 +1024,128 @@ export const INITIAL_EVENTS: SchoolEvent[] = [
     updated_at: '2026-10-25T08:00:00Z',
   },
 ];
+
+export const INITIAL_COMPLAINTS: StudentComplaint[] = [
+  {
+    id: 'cmp-0000000-0000-0000-0000-000000000001',
+    complaint_reference: 'CMP-2026-0001',
+    student_id: '10000000-0000-0000-0000-000000000001', // Hamza Khan
+    subject: 'Request for additional Physics textbook copies in library',
+    category: 'School Facilities',
+    description:
+      'The Class 9 Physics textbooks in the central library are insufficient during exam preparation week. Kindly arrange 5 additional copies.',
+    status: 'Resolved',
+    admin_response:
+      'The library committee has procured 6 new copies of the textbook, now available in Section B of the senior reading hall.',
+    reviewed_by: 'u0000000-0000-0000-0000-000000000001',
+    resolved_at: '2026-10-30T14:00:00Z',
+    created_at: '2026-10-26T09:30:00Z',
+    updated_at: '2026-10-30T14:00:00Z',
+  },
+  {
+    id: 'cmp-0000000-0000-0000-0000-000000000002',
+    complaint_reference: 'CMP-2026-0002',
+    student_id: '10000000-0000-0000-0000-000000000001', // Hamza Khan
+    subject: 'Class 9-A ceiling fan making loud noise',
+    category: 'Classroom Issue',
+    description:
+      'The rear ceiling fan in Classroom 102 (Class 9-A) vibrates loudly and distracts the lecture.',
+    status: 'Under Review',
+    admin_response:
+      'Maintenance team has scheduled electrical inspection today after 2:00 PM.',
+    reviewed_by: 'u0000000-0000-0000-0000-000000000001',
+    created_at: '2026-11-01T10:15:00Z',
+    updated_at: '2026-11-02T11:00:00Z',
+  },
+  {
+    id: 'cmp-0000000-0000-0000-0000-000000000003',
+    complaint_reference: 'CMP-2026-0003',
+    student_id: '10000000-0000-0000-0000-000000000002', // Ayan Ahmed
+    subject: 'Bus Route 4 arrival delayed by 25 minutes',
+    category: 'Transport Issue',
+    description:
+      'Bus Route 4 (Gulshan Ravi morning pick-up) arrived 25 minutes late twice this week, causing assembly misses.',
+    status: 'Submitted',
+    created_at: '2026-11-02T08:20:00Z',
+    updated_at: '2026-11-02T08:20:00Z',
+  },
+];
+
+export const INITIAL_COMPLAINT_NOTES: StudentComplaintNote[] = [
+  {
+    id: 'cn-0000000-0000-0000-0000-000000000001',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000001',
+    admin_id: 'u0000000-0000-0000-0000-000000000001',
+    admin_name: 'Administrator (Principal)',
+    note: 'Approved budget Rs. 4,500 from school discretionary maintenance fund.',
+    created_at: '2026-10-27T11:00:00Z',
+  },
+];
+
+export const INITIAL_COMPLAINT_HISTORY: StudentComplaintHistoryItem[] = [
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000001',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000001',
+    action: 'Submitted',
+    status: 'Submitted',
+    comment: 'Complaint submitted via Student Portal',
+    is_internal: false,
+    performed_by_name: 'Muhammad Hamza Khan',
+    created_at: '2026-10-26T09:30:00Z',
+  },
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000002',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000001',
+    action: 'Status Changed to In Progress',
+    status: 'In Progress',
+    comment: 'Forwarded to Library Incharge',
+    is_internal: false,
+    performed_by: 'u0000000-0000-0000-0000-000000000001',
+    performed_by_name: 'Administrator (Principal)',
+    created_at: '2026-10-27T10:00:00Z',
+  },
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000003',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000001',
+    action: 'Status Changed to Resolved',
+    status: 'Resolved',
+    comment: 'Procurement complete and books cataloged',
+    is_internal: false,
+    performed_by: 'u0000000-0000-0000-0000-000000000001',
+    performed_by_name: 'Administrator (Principal)',
+    created_at: '2026-10-30T14:00:00Z',
+  },
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000004',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000002',
+    action: 'Submitted',
+    status: 'Submitted',
+    comment: 'Complaint submitted via Student Portal',
+    is_internal: false,
+    performed_by_name: 'Muhammad Hamza Khan',
+    created_at: '2026-11-01T10:15:00Z',
+  },
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000005',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000002',
+    action: 'Status Changed to Under Review',
+    status: 'Under Review',
+    comment: 'Inspection ticket issued to electrician',
+    is_internal: false,
+    performed_by: 'u0000000-0000-0000-0000-000000000001',
+    performed_by_name: 'Administrator (Principal)',
+    created_at: '2026-11-02T11:00:00Z',
+  },
+  {
+    id: 'ch-0000000-0000-0000-0000-000000000006',
+    complaint_id: 'cmp-0000000-0000-0000-0000-000000000003',
+    action: 'Submitted',
+    status: 'Submitted',
+    comment: 'Complaint submitted via Student Portal',
+    is_internal: false,
+    performed_by_name: 'Ayan Ahmed',
+    created_at: '2026-11-02T08:20:00Z',
+  },
+];
+
 

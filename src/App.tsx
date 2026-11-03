@@ -25,6 +25,7 @@ import { StudentQuickSearchPage } from '@/pages/QuickSearch/StudentQuickSearchPa
 import { QuizMarksPage } from '@/pages/QuizMarks/QuizMarksPage';
 import { DailyDiaryPage } from '@/pages/DailyDiary/DailyDiaryPage';
 import { EventsAnnouncementsPage } from '@/pages/EventsAnnouncements/EventsAnnouncementsPage';
+import { StudentComplaintsPage } from '@/pages/AdminComplaints/StudentComplaintsPage';
 import { LoginPage } from '@/pages/Auth/LoginPage';
 
 // Teacher Portal Modules
@@ -41,6 +42,7 @@ import { MyFeesPage } from '@/pages/StudentPortal/MyFeesPage';
 import { MyFeeChallansPage } from '@/pages/StudentPortal/MyFeeChallansPage';
 import { MyDuesPage } from '@/pages/StudentPortal/MyDuesPage';
 import { MyAnnouncementsPage } from '@/pages/StudentPortal/MyAnnouncementsPage';
+import { MyComplaintsPage } from '@/pages/StudentPortal/MyComplaintsPage';
 import { BrandedLoadingScreen } from '@/components/common/BrandedLoadingScreen';
 
 const ProtectedLayout: React.FC = () => {
@@ -198,6 +200,14 @@ export const App: React.FC = () => {
                   }
                 />
                 <Route
+                  path="/my-complaints"
+                  element={
+                    <StudentRoute>
+                      <MyComplaintsPage />
+                    </StudentRoute>
+                  }
+                />
+                <Route
                   path="/my-quiz-marks"
                   element={
                     <StudentRoute>
@@ -297,6 +307,14 @@ export const App: React.FC = () => {
                   element={
                     <AdminRoute>
                       <UsersRolesPage />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/student-complaints"
+                  element={
+                    <AdminRoute>
+                      <StudentComplaintsPage />
                     </AdminRoute>
                   }
                 />
