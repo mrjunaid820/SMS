@@ -421,12 +421,14 @@ export const INITIAL_ENROLLMENTS: Enrollment[] = [
 ];
 
 export const INITIAL_ATTENDANCE: AttendanceRecord[] = [
-  { id: 'att-1', enrollment_id: '20000000-0000-0000-0000-000000000001', date: '2026-10-22', status: 'Present', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
+  { id: 'att-01', enrollment_id: '20000000-0000-0000-0000-000000000001', date: '2026-10-21', status: 'Present', remarks: 'Science lab session', created_at: '2026-10-21T08:00:00Z', updated_at: '2026-10-21T08:00:00Z' },
+  { id: 'att-1', enrollment_id: '20000000-0000-0000-0000-000000000001', date: '2026-10-22', status: 'Present', remarks: 'Morning assembly present', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
   { id: 'att-2', enrollment_id: '20000000-0000-0000-0000-000000000002', date: '2026-10-22', status: 'Present', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
   { id: 'att-3', enrollment_id: '20000000-0000-0000-0000-000000000003', date: '2026-10-22', status: 'Late', remarks: 'Traffic congestion on Ferozepur Rd', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
   { id: 'att-4', enrollment_id: '20000000-0000-0000-0000-000000000004', date: '2026-10-22', status: 'Present', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
   { id: 'att-5', enrollment_id: '20000000-0000-0000-0000-000000000005', date: '2026-10-22', status: 'Leave', remarks: 'Family wedding leave approved', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
   { id: 'att-6', enrollment_id: '20000000-0000-0000-0000-000000000006', date: '2026-10-22', status: 'Absent', created_at: '2026-10-22T08:00:00Z', updated_at: '2026-10-22T08:00:00Z' },
+  { id: 'att-02', enrollment_id: '20000000-0000-0000-0000-000000000001', date: '2026-11-02', status: 'Present', remarks: 'Regular classroom attendance', created_at: '2026-11-02T08:00:00Z', updated_at: '2026-11-02T08:00:00Z' },
 ];
 
 export const INITIAL_FEE_STRUCTURES: FeeStructure[] = [

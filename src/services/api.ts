@@ -3131,20 +3131,51 @@ export const attendanceApi = {
     return updatedList.filter(a => a.date === date);
   },
 
-  getAttendanceByEnrollment: async (enrollmentId: string): Promise<AttendanceRecord[]> => {
+  getAttendanceByEnrollmentIds: async (enrollmentIds: string[]): Promise<AttendanceRecord[]> => {
+    if (!enrollmentIds || enrollmentIds.length === 0) return [];
+
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('enrollment_id', enrollmentId)
-        .order('date', { ascending: false });
-      if (error) throw new Error(`Database error fetching student attendance history: ${error.message}`);
-      if (data) return data;
+      try {
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('*, enrollment:enrollments(*, student:students(*), section:sections(*, class:classes(*)), academic_session:academic_sessions(*))')
+          .in('enrollment_id', enrollmentIds)
+          .order('date', { ascending: false });
+
+        if (!error && data) {
+          return data;
+        }
+
+        // Fallback without deep nested relation
+        const { data: fallbackData, error: fbErr } = await supabase
+          .from('attendance')
+          .select('*')
+          .in('enrollment_id', enrollmentIds)
+          .order('date', { ascending: false });
+
+        if (!fbErr && fallbackData) {
+          return fallbackData;
+        }
+      } catch (e) {
+        console.warn('Error fetching attendance by enrollment ids from Supabase:', e);
+      }
     }
+
     const attendance = getStorage<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE);
+    const enrollments = await studentApi.getEnrollments();
+    const idSet = new Set(enrollmentIds);
+
     return attendance
-      .filter(a => a.enrollment_id === enrollmentId)
+      .filter((a) => idSet.has(a.enrollment_id))
+      .map((a) => ({
+        ...a,
+        enrollment: a.enrollment || enrollments.find((e) => e.id === a.enrollment_id),
+      }))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
+
+  getAttendanceByEnrollment: async (enrollmentId: string): Promise<AttendanceRecord[]> => {
+    return attendanceApi.getAttendanceByEnrollmentIds([enrollmentId]);
   },
 
   getAttendanceSummaryByPeriod: async (
@@ -5453,23 +5484,82 @@ export const studentSearchApi = {
 // 13. STUDENT PORTAL DATA ACCESS & SCOPING
 // -------------------------------------------------------------
 export const studentPortalApi = {
-  getStudentSelf: async (profileId: string): Promise<{ student: Student; enrollment?: Enrollment }> => {
-    const students = await studentApi.getStudents(true);
-    const student = students.find(
-      (s) =>
-        s.profile_id === profileId ||
-        s.id === profileId ||
-        (s.email && s.email.toLowerCase() === profileId.toLowerCase()) ||
-        (s.admission_no && s.admission_no.toLowerCase() === profileId.toLowerCase())
-    );
+  getStudentSelf: async (
+    profileId: string
+  ): Promise<{ student: Student; enrollment?: Enrollment; enrollments?: Enrollment[] }> => {
+    const cleanId = (profileId || '').trim();
+    let student: Student | undefined;
+
+    // 1. Direct Supabase query if configured
+    if (isLiveSupabaseConfigured() && cleanId) {
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('*')
+          .or(`profile_id.eq.${cleanId},id.eq.${cleanId},email.ilike.${cleanId},admission_no.ilike.${cleanId}`)
+          .maybeSingle();
+        if (!error && data) {
+          student = data;
+        }
+      } catch (e) {
+        // continue to list lookup
+      }
+    }
+
+    // 2. Lookup via studentApi.getStudents
+    if (!student) {
+      const students = await studentApi.getStudents(true);
+      student = students.find(
+        (s) =>
+          s.profile_id === cleanId ||
+          s.id === cleanId ||
+          (s.email && s.email.toLowerCase() === cleanId.toLowerCase()) ||
+          (s.admission_no && s.admission_no.toLowerCase() === cleanId.toLowerCase())
+      );
+    }
+
+    // 3. Fallback for mock storage students
+    if (!student) {
+      const allStudents = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      student = allStudents.find(
+        (s) =>
+          s.profile_id === cleanId ||
+          s.id === cleanId ||
+          (s.email && s.email.toLowerCase() === cleanId.toLowerCase()) ||
+          (s.admission_no && s.admission_no.toLowerCase() === cleanId.toLowerCase())
+      );
+    }
+
     if (!student) {
       throw new Error('No student record is linked to this user profile.');
     }
-    const enrollments = await studentApi.getEnrollments();
+
+    // 4. Retrieve student enrollments
+    let studentEnrollments: Enrollment[] = [];
+    if (isLiveSupabaseConfigured()) {
+      try {
+        const { data, error } = await supabase
+          .from('enrollments')
+          .select('*, section:sections(*, class:classes(*)), academic_session:academic_sessions(*)')
+          .eq('student_id', student.id);
+        if (!error && data && data.length > 0) {
+          studentEnrollments = data;
+        }
+      } catch (e) {
+        console.warn('Could not fetch student enrollments from Supabase:', e);
+      }
+    }
+
+    if (studentEnrollments.length === 0) {
+      const allEnrollments = await studentApi.getEnrollments();
+      studentEnrollments = allEnrollments.filter((e) => e.student_id === student.id);
+    }
+
     const enrollment =
-      enrollments.find((e) => e.student_id === student.id && e.status === 'active') ||
-      enrollments.find((e) => e.student_id === student.id);
-    return { student, enrollment };
+      studentEnrollments.find((e) => e.status === 'active') ||
+      studentEnrollments[0];
+
+    return { student, enrollment, enrollments: studentEnrollments };
   },
 
   getMyDashboardStats: async (profileId: string) => {
@@ -5478,7 +5568,7 @@ export const studentPortalApi = {
     let quizAvgPct = 0;
     let recentQuizzes: (QuizMark & { quiz: Quiz })[] = [];
     let recentDiaries: DailyDiary[] = [];
-    let attendancePct = 100;
+    let attendancePct: number | null = null;
     let latestExamResult: {
       examName: string;
       overallPercentage: number;
@@ -5514,7 +5604,7 @@ export const studentPortalApi = {
       // 3. Attendance Rate
       const attRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
       const present = attRecords.filter((r) => r.status === 'Present' || r.status === 'Late').length;
-      attendancePct = attRecords.length > 0 ? Math.round((present / attRecords.length) * 1000) / 10 : 100;
+      attendancePct = attRecords.length > 0 ? Math.round((present / attRecords.length) * 1000) / 10 : null;
 
       // 4. Latest Published Exam Result
       try {
@@ -5976,6 +6066,7 @@ export const studentPortalApi = {
   ): Promise<{
     student: Student;
     enrollment?: Enrollment;
+    enrollments?: Enrollment[];
     totalDays: number;
     presentDays: number;
     absentDays: number;
@@ -5993,8 +6084,11 @@ export const studentPortalApi = {
       percentage: number;
     }[];
   }> => {
-    const { student, enrollment } = await studentPortalApi.getStudentSelf(profileId);
-    if (!enrollment) {
+    const { student, enrollment, enrollments } = await studentPortalApi.getStudentSelf(profileId);
+    const targetEnrollments = enrollments && enrollments.length > 0 ? enrollments : (enrollment ? [enrollment] : []);
+    const enrollmentIds = targetEnrollments.map((e) => e.id);
+
+    if (enrollmentIds.length === 0) {
       return {
         student,
         totalDays: 0,
@@ -6008,7 +6102,7 @@ export const studentPortalApi = {
       };
     }
 
-    const allRecords = await attendanceApi.getAttendanceByEnrollment(enrollment.id);
+    const allRecords = await attendanceApi.getAttendanceByEnrollmentIds(enrollmentIds);
 
     // Monthly aggregation
     const monthMap = new Map<string, { total: number; present: number; absent: number; late: number; leave: number }>();
@@ -6052,6 +6146,7 @@ export const studentPortalApi = {
     return {
       student,
       enrollment,
+      enrollments: targetEnrollments,
       totalDays,
       presentDays,
       absentDays,
