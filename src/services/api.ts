@@ -301,24 +301,40 @@ export const academicStructureApi = {
   },
 
   getSubjects: async (): Promise<Subject[]> => {
+    const cachedSubjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
+    const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
+
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('subjects').select('*, class:classes(*)').order('name');
       if (!error && data && data.length > 0) {
-        return data.map((sub: any) => ({
-          ...sub,
-          is_active: sub.is_active !== undefined ? sub.is_active : true,
-          status: sub.status || (sub.is_active === false ? 'Inactive' : 'Active'),
-        }));
+        const merged: Subject[] = data.map((sub: any) => {
+          const cached = cachedSubjects.find(c => c.id === sub.id);
+          const isActive = (sub.is_active !== undefined && sub.is_active !== null)
+            ? Boolean(sub.is_active)
+            : (cached?.is_active !== undefined ? Boolean(cached.is_active) : true);
+
+          return {
+            ...sub,
+            description: sub.description !== undefined && sub.description !== null ? sub.description : (cached?.description || ''),
+            is_active: isActive,
+            status: isActive ? 'Active' : 'Inactive',
+            class: sub.class || classes.find(c => c.id === sub.class_id),
+          };
+        });
+        setStorage('subjects', merged);
+        return merged;
       }
     }
-    const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
-    const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
-    return subjects.map(sub => ({
-      ...sub,
-      is_active: sub.is_active !== undefined ? sub.is_active : true,
-      status: sub.status || (sub.is_active === false ? 'Inactive' : 'Active'),
-      class: classes.find(c => c.id === sub.class_id),
-    }));
+
+    return cachedSubjects.map(sub => {
+      const isActive = sub.is_active !== undefined ? Boolean(sub.is_active) : (sub.status !== 'Inactive');
+      return {
+        ...sub,
+        is_active: isActive,
+        status: isActive ? 'Active' : 'Inactive',
+        class: classes.find(c => c.id === sub.class_id),
+      };
+    });
   },
 
   createSubject: async (subj: Omit<Subject, 'id' | 'created_at'>, actor?: { id?: string; name?: string; role?: string }): Promise<Subject> => {
@@ -327,36 +343,59 @@ export const academicStructureApi = {
     }
     const fallbackCode = `${(subj.name.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase() || 'SUB')}-${Math.floor(100 + Math.random() * 900)}`;
     const cleanCode = subj.code?.trim() || fallbackCode;
-    const isActive = subj.is_active !== undefined ? subj.is_active : true;
-    const statusVal = subj.status || (isActive ? 'Active' : 'Inactive');
-    const payload = {
-      ...subj,
+    const isActive = subj.is_active !== undefined ? Boolean(subj.is_active) : (subj.status ? subj.status === 'Active' : true);
+    
+    // Exact DB columns payload (no duplicate status column)
+    const dbPayload: Record<string, any> = {
+      name: subj.name.trim(),
       code: cleanCode,
-      description: subj.description?.trim() || undefined,
+      class_id: subj.class_id,
+      is_elective: Boolean(subj.is_elective),
+      credit_hours: Number(subj.credit_hours) || 4,
       is_active: isActive,
-      status: statusVal,
     };
+    if (subj.description) {
+      dbPayload.description = subj.description.trim();
+    }
+
+    let createdId = generateUUID();
+    let createdTimestamp = new Date().toISOString();
 
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('subjects').insert([payload]).select('*, class:classes(*)').single();
-      if (error) throw error;
-      await logAudit(actor || { role: 'admin' }, 'SUBJECT_CREATED', 'subjects', data.id, { name: data.name, code: data.code, class_id: data.class_id });
-      return {
-        ...data,
-        is_active: data.is_active !== undefined ? data.is_active : true,
-        status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
-      };
+      let insertRes = await supabase.from('subjects').insert([dbPayload]).select('*, class:classes(*)').single();
+      
+      // If error is PGRST204 (column is_active or description not yet in schema cache), retry with base schema columns
+      if (insertRes.error && (insertRes.error.code === 'PGRST204' || insertRes.error.message?.includes('schema cache'))) {
+        const { is_active, description, ...basePayload } = dbPayload;
+        insertRes = await supabase.from('subjects').insert([basePayload]).select('*, class:classes(*)').single();
+      }
+
+      if (insertRes.error) {
+        throw new Error(`Failed to create subject in database: ${insertRes.error.message}`);
+      }
+
+      const resData = insertRes.data;
+      createdId = resData.id;
+      createdTimestamp = resData.created_at || createdTimestamp;
+      await logAudit(actor || { role: 'admin' }, 'SUBJECT_CREATED', 'subjects', createdId, { name: dbPayload.name, code: dbPayload.code, class_id: dbPayload.class_id });
     }
+
     const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
     const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
     const newSubj: Subject = {
-      ...payload,
-      id: generateUUID(),
-      created_at: new Date().toISOString(),
-      class: classes.find(c => c.id === payload.class_id),
+      id: createdId,
+      name: dbPayload.name,
+      code: dbPayload.code,
+      class_id: dbPayload.class_id,
+      description: subj.description?.trim() || '',
+      is_elective: dbPayload.is_elective,
+      credit_hours: dbPayload.credit_hours,
+      is_active: isActive,
+      status: isActive ? 'Active' : 'Inactive',
+      created_at: createdTimestamp,
+      class: classes.find(c => c.id === dbPayload.class_id),
     };
     setStorage('subjects', [...subjects, newSubj]);
-    await logAudit(actor || { role: 'admin' }, 'SUBJECT_CREATED', 'subjects', newSubj.id, { name: newSubj.name, code: newSubj.code, class_id: newSubj.class_id });
     return newSubj;
   },
 
@@ -364,54 +403,81 @@ export const academicStructureApi = {
     if (actor?.role && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to manage subjects.');
     }
+
+    // Determine target boolean status
     let isActive = updates.is_active;
-    let statusVal = updates.status;
-    if (isActive !== undefined && !statusVal) {
-      statusVal = isActive ? 'Active' : 'Inactive';
-    } else if (statusVal && isActive === undefined) {
-      isActive = statusVal === 'Active';
+    if (isActive === undefined && updates.status !== undefined) {
+      isActive = updates.status === 'Active';
     }
 
-    const cleanedUpdates: Partial<Subject> = {
-      ...updates,
-      ...(isActive !== undefined ? { is_active: isActive } : {}),
-      ...(statusVal ? { status: statusVal } : {}),
-      ...(updates.description !== undefined ? { description: updates.description.trim() } : {}),
-      ...(updates.name ? { name: updates.name.trim() } : {}),
-      ...(updates.code !== undefined ? { code: updates.code.trim() } : {}),
-    };
+    // Build clean DB payload without joined/virtual properties
+    const dbPayload: Record<string, any> = {};
+    if (updates.name !== undefined) dbPayload.name = updates.name.trim();
+    if (updates.code !== undefined) dbPayload.code = updates.code?.trim() || null;
+    if (updates.class_id !== undefined) dbPayload.class_id = updates.class_id;
+    if (updates.description !== undefined) dbPayload.description = updates.description?.trim() || null;
+    if (updates.is_elective !== undefined) dbPayload.is_elective = Boolean(updates.is_elective);
+    if (updates.credit_hours !== undefined) dbPayload.credit_hours = Number(updates.credit_hours);
+    if (isActive !== undefined) dbPayload.is_active = Boolean(isActive);
+
+    let supabaseUpdatedRow: any = null;
 
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('subjects').update(cleanedUpdates).eq('id', id).select('*, class:classes(*)').single();
-      if (error) throw error;
-      await logAudit(actor || { role: 'admin' }, 'SUBJECT_UPDATED', 'subjects', id, cleanedUpdates);
-      return {
-        ...data,
-        is_active: data.is_active !== undefined ? data.is_active : true,
-        status: data.status || (data.is_active === false ? 'Inactive' : 'Active'),
-      };
+      // 1. Attempt update with all payload columns including is_active
+      let updateRes = await supabase.from('subjects').update(dbPayload).eq('id', id).select('*, class:classes(*)').single();
+
+      // If the remote table schema cache does not have is_active or description yet (PGRST204)
+      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.message?.includes('schema cache'))) {
+        const { is_active, description, ...baseDbPayload } = dbPayload;
+        if (Object.keys(baseDbPayload).length > 0) {
+          const fallbackRes = await supabase.from('subjects').update(baseDbPayload).eq('id', id).select('*, class:classes(*)').single();
+          if (fallbackRes.error && fallbackRes.error.code !== 'PGRST116') {
+            throw new Error(`Database error: ${fallbackRes.error.message}`);
+          }
+          supabaseUpdatedRow = fallbackRes.data;
+        }
+      } else if (updateRes.error) {
+        throw new Error(`Failed to update subject in database: ${updateRes.error.message}`);
+      } else {
+        supabaseUpdatedRow = updateRes.data;
+      }
+
+      await logAudit(actor || { role: 'admin' }, 'SUBJECT_UPDATED', 'subjects', id, { ...dbPayload, is_active: isActive });
     }
 
+    // Always update and synchronize local persistent storage
     const subjects = getStorage<Subject[]>('subjects', INITIAL_SUBJECTS);
     const classes = getStorage<ClassLevel[]>('classes', INITIAL_CLASSES);
     const index = subjects.findIndex(s => s.id === id);
-    if (index === -1) {
-      throw new Error('Subject not found.');
+
+    if (index === -1 && !supabaseUpdatedRow) {
+      throw new Error(`Subject with ID "${id}" was not found.`);
     }
 
-    const updated: Subject = {
-      ...subjects[index],
-      ...cleanedUpdates,
-      is_active: isActive !== undefined ? isActive : subjects[index].is_active !== undefined ? subjects[index].is_active : true,
-      status: statusVal || subjects[index].status || 'Active',
-      class: cleanedUpdates.class_id
-        ? classes.find(c => c.id === cleanedUpdates.class_id)
-        : (subjects[index].class || classes.find(c => c.id === subjects[index].class_id)),
+    const effectiveIsActive = isActive !== undefined 
+      ? Boolean(isActive) 
+      : (index !== -1 && subjects[index].is_active !== undefined ? Boolean(subjects[index].is_active) : true);
+
+    const mergedClassId = updates.class_id || (index !== -1 ? subjects[index].class_id : undefined);
+
+    const updatedRecord: Subject = {
+      ...(index !== -1 ? subjects[index] : {}),
+      ...(supabaseUpdatedRow || {}),
+      ...updates,
+      id,
+      is_active: effectiveIsActive,
+      status: effectiveIsActive ? 'Active' : 'Inactive',
+      class: mergedClassId ? classes.find(c => c.id === mergedClassId) : (index !== -1 ? subjects[index].class : undefined),
     };
-    subjects[index] = updated;
-    setStorage('subjects', [...subjects]);
-    await logAudit(actor || { role: 'admin' }, 'SUBJECT_UPDATED', 'subjects', id, cleanedUpdates);
-    return updated;
+
+    if (index !== -1) {
+      subjects[index] = updatedRecord;
+      setStorage('subjects', [...subjects]);
+    } else {
+      setStorage('subjects', [...subjects, updatedRecord]);
+    }
+
+    return updatedRecord;
   },
 
   checkSubjectDependencies: async (id: string): Promise<SubjectDependencySummary> => {

@@ -146,7 +146,7 @@ describe('Curriculum & Subject Management (Add, Edit, Safe Deletion, Dynamic Cla
     });
   });
 
-  describe('3. Edit Subject', () => {
+  describe('3. Edit Subject & Status Persistence', () => {
     it('allows Admin to edit subject details and updates list immediately', async () => {
       const classes = await academicStructureApi.getClasses();
       const class6 = classes.find((c) => c.name.includes('Class 6'))!;
@@ -199,6 +199,47 @@ describe('Curriculum & Subject Management (Add, Edit, Safe Deletion, Dynamic Cla
       expect(savedInList?.status).toBe('Inactive');
     });
 
+    it('successfully changes Active to Inactive, persists across reload, and changes back to Active', async () => {
+      // 1. Open an Active subject
+      const initialSubjects = await academicStructureApi.getSubjects();
+      const targetSubject = initialSubjects.find((s) => s.name === 'Urdu Compulsory')!;
+      expect(targetSubject).toBeDefined();
+      expect(targetSubject.is_active).toBe(true);
+      expect(targetSubject.status).toBe('Active');
+
+      // 2. Change status to Inactive and save
+      const inactiveResult = await academicStructureApi.updateSubject(
+        targetSubject.id,
+        { is_active: false, status: 'Inactive' },
+        adminActor
+      );
+      expect(inactiveResult.id).toBe(targetSubject.id);
+      expect(inactiveResult.is_active).toBe(false);
+      expect(inactiveResult.status).toBe('Inactive');
+
+      // 3. Verify database/storage record after simulated page refresh (calling getSubjects)
+      const afterReload1 = await academicStructureApi.getSubjects();
+      const reloadedSubject1 = afterReload1.find((s) => s.id === targetSubject.id)!;
+      expect(reloadedSubject1.is_active).toBe(false);
+      expect(reloadedSubject1.status).toBe('Inactive');
+
+      // 4. Change status back to Active and save
+      const activeResult = await academicStructureApi.updateSubject(
+        targetSubject.id,
+        { is_active: true, status: 'Active' },
+        adminActor
+      );
+      expect(activeResult.id).toBe(targetSubject.id);
+      expect(activeResult.is_active).toBe(true);
+      expect(activeResult.status).toBe('Active');
+
+      // 5. Verify database/storage record after second simulated page refresh
+      const afterReload2 = await academicStructureApi.getSubjects();
+      const reloadedSubject2 = afterReload2.find((s) => s.id === targetSubject.id)!;
+      expect(reloadedSubject2.is_active).toBe(true);
+      expect(reloadedSubject2.status).toBe('Active');
+    });
+
     it('rejects subject edits from unauthorized users', async () => {
       const allSubjects = await academicStructureApi.getSubjects();
       const first = allSubjects[0];
@@ -210,6 +251,16 @@ describe('Curriculum & Subject Management (Add, Edit, Safe Deletion, Dynamic Cla
           teacherActor
         )
       ).rejects.toThrow(/Unauthorized/i);
+    });
+
+    it('fails cleanly with meaningful error when attempting to update nonexistent subject', async () => {
+      await expect(
+        academicStructureApi.updateSubject(
+          '00000000-0000-0000-0000-000000000000',
+          { is_active: false },
+          adminActor
+        )
+      ).rejects.toThrow();
     });
   });
 
@@ -304,6 +355,86 @@ describe('Curriculum & Subject Management (Add, Edit, Safe Deletion, Dynamic Cla
       const codeResults = allSubjects.filter((s) => s.code?.toLowerCase().includes('urd-09'));
       expect(codeResults.length).toBe(1);
       expect(codeResults[0].name).toBe('Urdu Compulsory');
+    });
+
+    it('correctly filters combinations of Class (Class 7 / All Classes) and Status (Active / Inactive)', async () => {
+      const classes = await academicStructureApi.getClasses();
+      const class7 = classes.find((c) => c.name.includes('Class 7'))!;
+      const class9 = classes.find((c) => c.name.includes('Class 9'))!;
+
+      // Create an Active subject in Class 7
+      const sci7 = await academicStructureApi.createSubject(
+        {
+          name: 'Class 7 General Science',
+          code: 'SCI-07',
+          class_id: class7.id,
+          is_elective: false,
+          credit_hours: 5,
+          is_active: true,
+          status: 'Active',
+        },
+        adminActor
+      );
+
+      // Create an Inactive subject in Class 7
+      const hist7 = await academicStructureApi.createSubject(
+        {
+          name: 'Class 7 Ancient History',
+          code: 'HST-07',
+          class_id: class7.id,
+          is_elective: false,
+          credit_hours: 3,
+          is_active: false,
+          status: 'Inactive',
+        },
+        adminActor
+      );
+
+      // In Class 9, deactivate one subject (Biology)
+      const allSubjects = await academicStructureApi.getSubjects();
+      const biology = allSubjects.find((s) => s.name === 'Biology')!;
+      await academicStructureApi.updateSubject(
+        biology.id,
+        { is_active: false, status: 'Inactive' },
+        adminActor
+      );
+
+      // Reload dataset to simulate real UI state after operations
+      const dataset = await academicStructureApi.getSubjects();
+
+      // Test 1: Class 7 + Active -> only Class 7 General Science
+      const class7Active = dataset.filter((s) => {
+        const matchesClass = s.class_id === class7.id;
+        const matchesStatus = s.is_active !== false && s.status !== 'Inactive';
+        return matchesClass && matchesStatus;
+      });
+      expect(class7Active.length).toBe(1);
+      expect(class7Active[0].id).toBe(sci7.id);
+      expect(class7Active[0].name).toBe('Class 7 General Science');
+
+      // Test 2: Class 7 + Inactive -> only Class 7 Ancient History
+      const class7Inactive = dataset.filter((s) => {
+        const matchesClass = s.class_id === class7.id;
+        const matchesStatus = s.is_active === false || s.status === 'Inactive';
+        return matchesClass && matchesStatus;
+      });
+      expect(class7Inactive.length).toBe(1);
+      expect(class7Inactive[0].id).toBe(hist7.id);
+      expect(class7Inactive[0].name).toBe('Class 7 Ancient History');
+
+      // Test 3: All Classes + Active -> contains Class 7 Science and Class 9 active subjects (excludes Inactive Biology & Ancient History)
+      const allActive = dataset.filter((s) => s.is_active !== false && s.status !== 'Inactive');
+      expect(allActive.some((s) => s.id === sci7.id)).toBe(true);
+      expect(allActive.some((s) => s.id === hist7.id)).toBe(false);
+      expect(allActive.some((s) => s.name === 'Biology')).toBe(false);
+      expect(allActive.some((s) => s.name === 'English Compulsory')).toBe(true);
+
+      // Test 4: All Classes + Inactive -> contains exactly Class 7 Ancient History + Class 9 Biology
+      const allInactive = dataset.filter((s) => s.is_active === false || s.status === 'Inactive');
+      expect(allInactive.some((s) => s.id === hist7.id)).toBe(true);
+      expect(allInactive.some((s) => s.name === 'Biology')).toBe(true);
+      expect(allInactive.some((s) => s.id === sci7.id)).toBe(false);
+      expect(allInactive.some((s) => s.name === 'English Compulsory')).toBe(false);
     });
   });
 });

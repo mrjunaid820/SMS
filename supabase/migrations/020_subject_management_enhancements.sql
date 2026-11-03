@@ -5,15 +5,17 @@
 -- 1. Schema Enhancements:
 --    - Optional subject code (DROP NOT NULL)
 --    - Subject description (TEXT)
---    - Subject active status (is_active BOOLEAN, status VARCHAR)
+--    - Canonical boolean status column: is_active (BOOLEAN NOT NULL DEFAULT TRUE)
+--      (Follows standard schema pattern used by teachers, students, and profiles;
+--       avoids duplicate status columns).
 -- 2. Safe Subject Deletion & Dependency Verification:
 --    - admin_check_subject_deletion_eligibility
 --    - admin_safe_delete_subject
 --    - admin_set_subject_status
 -- 3. Row Level Security & Access Control:
---    - Admin full access (SELECT, INSERT, UPDATE, DELETE)
---    - Teacher read access
---    - Student read access
+--    - Admins: explicit full operational access (SELECT, INSERT, UPDATE, DELETE)
+--    - Teachers: SELECT only (read-only)
+--    - Students: SELECT only for active subjects (read-only)
 -- ==============================================================================
 
 -- 1. SCHEMA MODIFICATIONS
@@ -27,7 +29,7 @@ BEGIN
         ALTER TABLE public.subjects ADD COLUMN description TEXT;
     END IF;
 
-    -- Add is_active column if missing
+    -- Add canonical is_active column if missing
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns 
         WHERE table_schema = 'public' AND table_name = 'subjects' AND column_name = 'is_active'
@@ -35,22 +37,13 @@ BEGIN
         ALTER TABLE public.subjects ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;
     END IF;
 
-    -- Add status column if missing
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'subjects' AND column_name = 'status'
-    ) THEN
-        ALTER TABLE public.subjects ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Active';
-    END IF;
-
-    -- Allow code to be nullable (optional code requirement)
+    -- Allow code to be nullable (optional subject code requirement)
     ALTER TABLE public.subjects ALTER COLUMN code DROP NOT NULL;
 END $$;
 
 -- Performance indexes for subject lookups & filtering
 CREATE INDEX IF NOT EXISTS idx_subjects_class_id ON public.subjects(class_id);
 CREATE INDEX IF NOT EXISTS idx_subjects_is_active ON public.subjects(is_active);
-CREATE INDEX IF NOT EXISTS idx_subjects_status ON public.subjects(status);
 
 -- ------------------------------------------------------------------------------
 -- 2. FUNCTION: public.admin_check_subject_deletion_eligibility
@@ -214,7 +207,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions, auth;
 
 -- ------------------------------------------------------------------------------
 -- 4. FUNCTION: public.admin_set_subject_status
--- Toggles a subject between Active and Inactive (safely archivable)
+-- Toggles a subject between Active (TRUE) and Inactive (FALSE) safely
 -- ------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.admin_set_subject_status(
     p_subject_id UUID,
@@ -223,7 +216,6 @@ CREATE OR REPLACE FUNCTION public.admin_set_subject_status(
 RETURNS JSONB AS $$
 DECLARE
     v_subject RECORD;
-    v_status_str VARCHAR(20);
 BEGIN
     IF NOT public.is_admin() THEN
         RAISE EXCEPTION 'Unauthorized: Only school administrators can modify subject status.';
@@ -234,11 +226,8 @@ BEGIN
         RAISE EXCEPTION 'Subject record not found.';
     END IF;
 
-    v_status_str := CASE WHEN p_active THEN 'Active' ELSE 'Inactive' END;
-
     UPDATE public.subjects
-    SET is_active = p_active,
-        status = v_status_str
+    SET is_active = p_active
     WHERE id = p_subject_id;
 
     -- Audit Log
@@ -262,8 +251,7 @@ BEGIN
         jsonb_build_object(
             'subject_name', v_subject.name,
             'code', v_subject.code,
-            'is_active', p_active,
-            'status', v_status_str
+            'is_active', p_active
         ),
         '127.0.0.1',
         now()
@@ -273,18 +261,57 @@ BEGIN
         'success', true,
         'subject_id', p_subject_id,
         'is_active', p_active,
-        'status', v_status_str,
-        'message', format('Subject "%s" status updated to %s.', v_subject.name, v_status_str)
+        'message', format('Subject "%s" status updated to %s.', v_subject.name, CASE WHEN p_active THEN 'Active' ELSE 'Inactive' END)
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions, auth;
 
 -- ------------------------------------------------------------------------------
--- 5. RLS POLICIES
+-- 5. ROW LEVEL SECURITY (RLS) POLICIES
 -- ------------------------------------------------------------------------------
 DO $$
 BEGIN
-    -- Ensure students can read active subjects
+    -- Explicit Admin UPDATE policy
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+          AND tablename = 'subjects' 
+          AND policyname = 'Admins can update subjects'
+    ) THEN
+        CREATE POLICY "Admins can update subjects"
+            ON public.subjects FOR UPDATE
+            TO authenticated
+            USING (public.is_admin())
+            WITH CHECK (public.is_admin());
+    END IF;
+
+    -- Explicit Admin INSERT policy
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+          AND tablename = 'subjects' 
+          AND policyname = 'Admins can insert subjects'
+    ) THEN
+        CREATE POLICY "Admins can insert subjects"
+            ON public.subjects FOR INSERT
+            TO authenticated
+            WITH CHECK (public.is_admin());
+    END IF;
+
+    -- Explicit Admin DELETE policy
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE schemaname = 'public' 
+          AND tablename = 'subjects' 
+          AND policyname = 'Admins can delete subjects'
+    ) THEN
+        CREATE POLICY "Admins can delete subjects"
+            ON public.subjects FOR DELETE
+            TO authenticated
+            USING (public.is_admin());
+    END IF;
+
+    -- Students can view active subjects (read-only)
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies 
         WHERE schemaname = 'public' 

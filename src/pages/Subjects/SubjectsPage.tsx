@@ -228,6 +228,8 @@ export const SubjectsPage: React.FC = () => {
       return;
     }
 
+    const targetIsActive = formData.status === 'Active';
+
     setIsSubmitting(true);
     try {
       const updated = await academicStructureApi.updateSubject(
@@ -239,22 +241,18 @@ export const SubjectsPage: React.FC = () => {
           description: formData.description.trim(),
           is_elective: formData.is_elective,
           credit_hours: Number(formData.credit_hours) || 4,
-          is_active: formData.is_active,
-          status: formData.status,
+          is_active: targetIsActive,
+          status: targetIsActive ? 'Active' : 'Inactive',
         },
         actor
       );
 
-      // Immediately update local state
-      setSubjects((prev) =>
-        prev.map((s) => (s.id === updated.id ? { ...updated, class: classes.find((c) => c.id === updated.class_id) } : s))
-      );
-
       setIsEditModalOpen(false);
       setEditingSubject(null);
+      await loadData();
       setFeedback({
         type: 'success',
-        message: `Subject "${updated.name}" updated successfully.`,
+        message: `Subject "${updated.name}" updated successfully. Status is now ${updated.is_active ? 'Active' : 'Inactive'}.`,
       });
     } catch (err: any) {
       console.error('Update subject failed', err);
@@ -294,6 +292,7 @@ export const SubjectsPage: React.FC = () => {
       setIsDeleteModalOpen(false);
       setDeletingSubject(null);
       setDependencySummary(null);
+      await loadData();
       setFeedback({ type: 'success', message: res.message });
     } catch (err: any) {
       console.error('Permanent delete failed', err);
@@ -324,6 +323,7 @@ export const SubjectsPage: React.FC = () => {
       setIsDeleteModalOpen(false);
       setDeletingSubject(null);
       setDependencySummary(null);
+      await loadData();
       setFeedback({
         type: 'success',
         message: `Subject "${updated.name}" was safely deactivated. Historical records and marks remain preserved.`,
