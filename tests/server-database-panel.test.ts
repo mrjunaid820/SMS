@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isLiveSupabaseConfigured } from '../src/config/supabase';
+import { APP_CONFIG } from '../src/config/constants';
 
 describe('Server & Database Connection Health & Configuration Isolation', () => {
   it('correctly classifies mock or placeholder configurations', () => {
@@ -18,5 +19,18 @@ describe('Server & Database Connection Health & Configuration Isolation', () => 
     expect((import.meta.env as any).SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
     expect((import.meta.env as any).DATABASE_URL).toBeUndefined();
     expect((import.meta.env as any).POSTGRES_PASSWORD).toBeUndefined();
+  });
+
+  it('correctly configures required institutional environment values for Noor-Ul-Ilm School System', () => {
+    expect(APP_CONFIG.name).toBe('Noor-Ul-Ilm School System');
+    expect(APP_CONFIG.currencySymbol).toBe('Rs.');
+    expect(APP_CONFIG.timezone).toBe('Asia/Karachi');
+  });
+
+  it('treats registration number as optional and displays "Not Configured" when unset', () => {
+    // When VITE_APP_REGISTRATION_NO is empty or unset, registrationNo defaults to "Not Configured"
+    expect(APP_CONFIG.registrationNo).toBe('Not Configured');
+    // Functionality is not blocked by missing registration number
+    expect(typeof APP_CONFIG.name).toBe('string');
   });
 });

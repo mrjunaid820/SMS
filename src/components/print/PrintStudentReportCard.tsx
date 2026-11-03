@@ -49,7 +49,7 @@ export const PrintStudentReportCard: React.FC<PrintStudentReportCardProps> = ({
         </div>
         <p className="text-xs text-slate-600 font-semibold">{settings.affiliation || 'Federal Board of Intermediate and Secondary Education (FBISE) Islamabad'}</p>
         <p className="text-[11px] text-slate-500">
-          Reg No: {settings.registration_number || 'SED-ISB-2020-9412'} | Phone: {settings.phone || '+92 333 5352110'}{settings.landline ? ` • Tel: ${settings.landline}` : ''} | {settings.address || 'Block B, Multi Gardens, B-17, Islamabad, Pakistan'}
+          Reg No: {settings.registration_number || 'Not Configured'} | Phone: {settings.phone || '+92 333 5352110'}{settings.landline ? ` • Tel: ${settings.landline}` : ''} | {settings.address || 'Block B, Multi Gardens, B-17, Islamabad, Pakistan'}
         </p>
         <div className="mt-2 inline-block bg-navy-900 text-white text-xs font-bold uppercase px-4 py-1 rounded-full">
           Official Student Academic Dossier & Performance Report ({sessionName})

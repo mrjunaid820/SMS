@@ -32,7 +32,7 @@ import {
 export const INITIAL_SCHOOL_SETTINGS: SchoolSettings = {
   id: 'a0000000-0000-0000-0000-000000000001',
   school_name: 'Noor-Ul-Ilm School System',
-  registration_number: 'SED-ISB-2020-9412',
+  registration_number: import.meta.env.VITE_APP_REGISTRATION_NO || undefined,
   affiliation: 'Federal Board of Intermediate and Secondary Education (FBISE) Islamabad',
   phone: '+92 333 5352110',
   landline: '051-7065481',

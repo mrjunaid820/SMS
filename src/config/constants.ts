@@ -2,7 +2,7 @@ import { GradeRule } from '@/types/database';
 
 export const APP_CONFIG = {
   name: import.meta.env.VITE_APP_NAME || 'Noor-Ul-Ilm School System',
-  registrationNo: import.meta.env.VITE_APP_REGISTRATION_NO || 'SED-ISB-2020-9412',
+  registrationNo: import.meta.env.VITE_APP_REGISTRATION_NO || 'Not Configured',
   currency: import.meta.env.VITE_APP_CURRENCY || 'PKR',
   currencySymbol: import.meta.env.VITE_APP_CURRENCY_SYMBOL || 'Rs.',
   timezone: import.meta.env.VITE_APP_TIMEZONE || 'Asia/Karachi',

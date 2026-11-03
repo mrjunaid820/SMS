@@ -147,7 +147,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ defaultTab = 'profil
 
                 <div className="grid grid-cols-2 gap-3">
                   <Input
-                    label="Registration Number"
+                    label="Registration Number (Optional)"
+                    placeholder="Not Configured"
                     value={formData.registration_number || ''}
                     onChange={(e) => setFormData({ ...formData, registration_number: e.target.value })}
                   />

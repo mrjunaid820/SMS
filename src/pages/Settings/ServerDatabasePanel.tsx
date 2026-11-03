@@ -505,12 +505,7 @@ export const ServerDatabasePanel: React.FC = () => {
               <EnvVarRow
                 name="VITE_APP_NAME"
                 isSet={Boolean(import.meta.env.VITE_APP_NAME)}
-                note={import.meta.env.VITE_APP_NAME || 'Default school name'}
-              />
-              <EnvVarRow
-                name="VITE_APP_REGISTRATION_NO"
-                isSet={Boolean(import.meta.env.VITE_APP_REGISTRATION_NO)}
-                note={import.meta.env.VITE_APP_REGISTRATION_NO || 'Unset'}
+                note={import.meta.env.VITE_APP_NAME || 'Noor-Ul-Ilm School System'}
               />
               <EnvVarRow
                 name="VITE_APP_CURRENCY_SYMBOL"
@@ -521,6 +516,12 @@ export const ServerDatabasePanel: React.FC = () => {
                 name="VITE_APP_TIMEZONE"
                 isSet={Boolean(import.meta.env.VITE_APP_TIMEZONE)}
                 note={import.meta.env.VITE_APP_TIMEZONE || 'Asia/Karachi'}
+              />
+              <EnvVarRow
+                name="VITE_APP_REGISTRATION_NO"
+                isSet={Boolean(import.meta.env.VITE_APP_REGISTRATION_NO && import.meta.env.VITE_APP_REGISTRATION_NO.trim() !== '')}
+                isOptional={true}
+                note={import.meta.env.VITE_APP_REGISTRATION_NO && import.meta.env.VITE_APP_REGISTRATION_NO.trim() !== '' ? import.meta.env.VITE_APP_REGISTRATION_NO : 'Not Configured'}
               />
             </div>
 
@@ -577,12 +578,17 @@ export const ServerDatabasePanel: React.FC = () => {
                 In your Vercel Project &rarr; <strong>Settings &rarr; Environment Variables</strong>, add the following variables for Production & Preview:
               </p>
               <div className="relative font-mono text-[11px] bg-slate-900 text-slate-100 p-3 rounded-lg overflow-x-auto">
-                <pre>{`VITE_SUPABASE_URL=https://${projectRef}.supabase.co\nVITE_SUPABASE_ANON_KEY=your_public_anon_key`}</pre>
+                <pre>{`VITE_SUPABASE_URL=https://${projectRef}.supabase.co
+VITE_SUPABASE_ANON_KEY=your_public_anon_key
+VITE_APP_NAME=Noor-Ul-Ilm School System
+VITE_APP_CURRENCY_SYMBOL=Rs.
+VITE_APP_TIMEZONE=Asia/Karachi
+# VITE_APP_REGISTRATION_NO= (Optional - leave empty if unassigned)`}</pre>
                 <button
                   type="button"
                   onClick={() =>
                     copyToClipboard(
-                      `VITE_SUPABASE_URL=https://${projectRef}.supabase.co\nVITE_SUPABASE_ANON_KEY=`,
+                      `VITE_SUPABASE_URL=https://${projectRef}.supabase.co\nVITE_SUPABASE_ANON_KEY=\nVITE_APP_NAME=Noor-Ul-Ilm School System\nVITE_APP_CURRENCY_SYMBOL=Rs.\nVITE_APP_TIMEZONE=Asia/Karachi\n`,
                       'env_template'
                     )
                   }
@@ -621,21 +627,45 @@ export const ServerDatabasePanel: React.FC = () => {
 };
 
 // Helper component for Environment Variable row
-const EnvVarRow: React.FC<{ name: string; isSet: boolean; note?: string }> = ({ name, isSet, note }) => {
+const EnvVarRow: React.FC<{
+  name: string;
+  isSet: boolean;
+  isOptional?: boolean;
+  note?: string;
+}> = ({ name, isSet, isOptional, note }) => {
+  const isConfigured = isSet;
+  const statusLabel = isConfigured ? 'Configured' : isOptional ? 'Not Configured' : 'Missing';
+  const badgeVariant = isConfigured ? 'success' : isOptional ? 'outline' : 'danger';
+  const displayNote = note || (isOptional && !isSet ? 'Not Configured' : undefined);
+
   return (
-    <div className="py-2 flex items-center justify-between">
+    <div className="py-2.5 flex items-center justify-between">
       <div className="flex items-center gap-2">
-        {isSet ? (
+        {isConfigured ? (
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+        ) : isOptional ? (
+          <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
         ) : (
           <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
         )}
-        <code className="font-mono text-slate-800 dark:text-slate-200 text-[11px]">{name}</code>
+        <div className="flex items-center gap-1.5">
+          <code className="font-mono text-slate-800 dark:text-slate-200 text-[11px] font-semibold">{name}</code>
+          {isOptional && (
+            <span className="text-[10px] text-slate-400 font-normal">(Optional)</span>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-2">
-        {note && <span className="text-slate-400 text-[11px] truncate max-w-[150px]">{note}</span>}
-        <Badge variant={isSet ? 'success' : 'danger'} size="sm">
-          {isSet ? 'Set' : 'Missing'}
+        {displayNote && (
+          <span
+            className="text-slate-500 dark:text-slate-400 text-[11px] font-mono truncate max-w-[200px]"
+            title={displayNote}
+          >
+            {displayNote}
+          </span>
+        )}
+        <Badge variant={badgeVariant} size="sm">
+          {statusLabel}
         </Badge>
       </div>
     </div>
