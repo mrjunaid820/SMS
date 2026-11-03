@@ -44,12 +44,12 @@ export const PrintStudentReportCard: React.FC<PrintStudentReportCardProps> = ({
         <div className="flex items-center justify-center gap-2 mb-1">
           <Shield className="w-8 h-8 text-navy-900" />
           <h1 className="text-xl font-black uppercase tracking-wider text-navy-950">
-            {settings.school_name}
+            {settings.school_name || 'Noor-Ul-Ilm School System'}
           </h1>
         </div>
-        <p className="text-xs text-slate-600 font-semibold">{settings.affiliation}</p>
+        <p className="text-xs text-slate-600 font-semibold">{settings.affiliation || 'Federal Board of Intermediate and Secondary Education (FBISE) Islamabad'}</p>
         <p className="text-[11px] text-slate-500">
-          Reg No: {settings.registration_number} | Phone: {settings.phone} | {settings.address}
+          Reg No: {settings.registration_number || 'SED-ISB-2020-9412'} | Phone: {settings.phone || '+92 333 5352110'}{settings.landline ? ` • Tel: ${settings.landline}` : ''} | {settings.address || 'Block B, Multi Gardens, B-17, Islamabad, Pakistan'}
         </p>
         <div className="mt-2 inline-block bg-navy-900 text-white text-xs font-bold uppercase px-4 py-1 rounded-full">
           Official Student Academic Dossier & Performance Report ({sessionName})

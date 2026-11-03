@@ -173,14 +173,27 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ defaultTab = 'profil
 
                 <div className="grid grid-cols-2 gap-3">
                   <Input
-                    label="Official Phone"
+                    label="Official Mobile / Phone"
                     value={formData.phone || ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   />
                   <Input
+                    label="Official Landline"
+                    value={formData.landline || ''}
+                    onChange={(e) => setFormData({ ...formData, landline: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
                     label="Official Email"
                     value={formData.email || ''}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  />
+                  <Input
+                    label="Official Website"
+                    value={formData.website || ''}
+                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                   />
                 </div>
 

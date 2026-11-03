@@ -7,7 +7,7 @@ export interface BrandedLoadingScreenProps {
 }
 
 export const BrandedLoadingScreen: React.FC<BrandedLoadingScreenProps> = ({
-  message = 'Islamia Public High School',
+  message = 'Noor-Ul-Ilm School System',
   submessage = 'Preparing your institutional dashboard...',
 }) => {
   return (

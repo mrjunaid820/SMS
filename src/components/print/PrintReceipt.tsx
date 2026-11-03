@@ -22,9 +22,12 @@ export const PrintReceipt: React.FC<PrintReceiptProps> = ({ payment, invoice, se
           <CheckCircle2 className="w-5 h-5" />
           <span className="text-xs font-bold uppercase tracking-wider">OFFICIAL PAYMENT RECEIPT</span>
         </div>
-        <h2 className="text-base font-bold text-navy-950 uppercase">{settings.school_name}</h2>
-        <p className="text-[10px] text-slate-500">{settings.address}</p>
-        <p className="text-[10px] text-slate-500">Ph: {settings.phone}</p>
+        <h2 className="text-base font-bold text-navy-950 uppercase">{settings.school_name || 'Noor-Ul-Ilm School System'}</h2>
+        <p className="text-[10px] text-slate-500">{settings.address || 'Block B, Multi Gardens, B-17, Islamabad, Pakistan'}</p>
+        <p className="text-[10px] text-slate-500">
+          Phone: {settings.phone || '+92 333 5352110'}{settings.landline ? ` • Landline: ${settings.landline}` : ''}
+          {settings.email ? ` • ${settings.email}` : ''}
+        </p>
       </div>
 
       {/* Details */}

@@ -138,9 +138,44 @@ export const settingsApi = {
   getSettings: async (): Promise<SchoolSettings> => {
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase.from('school_settings').select('*').limit(1).maybeSingle();
-      if (!error && data && data.length > 0) return data;
+      if (!error && data) {
+        return {
+          ...INITIAL_SCHOOL_SETTINGS,
+          ...data,
+          landline: data.landline || INITIAL_SCHOOL_SETTINGS.landline,
+          website: data.website || INITIAL_SCHOOL_SETTINGS.website,
+          country: data.country || INITIAL_SCHOOL_SETTINGS.country,
+          timezone: data.timezone || INITIAL_SCHOOL_SETTINGS.timezone,
+        };
+      }
     }
-    return getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
+    const current = getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
+    if (
+      !current ||
+      current.school_name === 'Islamia Public High School' ||
+      !current.phone ||
+      current.phone.includes('35881234') ||
+      !current.landline
+    ) {
+      const updated: SchoolSettings = {
+        ...INITIAL_SCHOOL_SETTINGS,
+        ...(current || {}),
+        school_name: INITIAL_SCHOOL_SETTINGS.school_name,
+        address: INITIAL_SCHOOL_SETTINGS.address,
+        phone: INITIAL_SCHOOL_SETTINGS.phone,
+        landline: INITIAL_SCHOOL_SETTINGS.landline,
+        email: INITIAL_SCHOOL_SETTINGS.email,
+        website: INITIAL_SCHOOL_SETTINGS.website,
+        country: INITIAL_SCHOOL_SETTINGS.country,
+        currency_symbol: INITIAL_SCHOOL_SETTINGS.currency_symbol,
+        currency_code: INITIAL_SCHOOL_SETTINGS.currency_code,
+        timezone: INITIAL_SCHOOL_SETTINGS.timezone,
+        affiliation: INITIAL_SCHOOL_SETTINGS.affiliation,
+      };
+      setStorage('settings', updated);
+      return updated;
+    }
+    return current;
   },
 
   updateSettings: async (settings: Partial<SchoolSettings>, actor?: { id?: string; name?: string; role?: string }): Promise<SchoolSettings> => {
@@ -148,10 +183,25 @@ export const settingsApi = {
       throw new Error('Unauthorized: Only administrators are authorized to update school settings.');
     }
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('school_settings').update(settings).eq('id', settings.id!).select().single();
-      if (error) throw error;
+      const { landline, website, country, timezone, currency_code, ...supabasePayload } = settings;
+      let remoteData = null;
+      try {
+        const { data, error } = await supabase.from('school_settings').update(supabasePayload).eq('id', settings.id!).select().single();
+        if (!error && data) {
+          remoteData = data;
+        }
+      } catch (err) {
+        console.warn('Live school settings update fallback:', err);
+      }
       await logAudit(actor || {}, 'SETTINGS_UPDATED', 'school_settings', settings.id!, settings);
-      return data;
+      const merged: SchoolSettings = {
+        ...INITIAL_SCHOOL_SETTINGS,
+        ...(remoteData || {}),
+        ...settings,
+        updated_at: new Date().toISOString(),
+      };
+      setStorage('settings', merged);
+      return merged;
     }
     const current = getStorage<SchoolSettings>('settings', INITIAL_SCHOOL_SETTINGS);
     const updated = { ...current, ...settings, updated_at: new Date().toISOString() };

@@ -36,7 +36,7 @@ export const PrintFeeVoucher: React.FC<PrintFeeVoucherProps> = ({ invoice, setti
               <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 px-2 py-0.5 rounded border border-slate-300 inline-block mb-1">
                 {copyName}
               </span>
-              <h2 className="text-xs font-bold text-navy-950 uppercase">{settings.school_name}</h2>
+              <h2 className="text-xs font-bold text-navy-950 uppercase">{settings.school_name || 'Noor-Ul-Ilm School System'}</h2>
               <p className="text-[9px] text-slate-500">A/C # 0123-45678901-03 (Habib Bank Ltd)</p>
             </div>
 

@@ -121,7 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse,
           {!isCollapsed && (
             <div className="mt-2 text-center">
               <h1 className="text-sm font-bold text-white tracking-tight leading-snug line-clamp-2">
-                {settings.school_name || 'Islamia Public High School'}
+                {settings.school_name || 'Noor-Ul-Ilm School System'}
               </h1>
             </div>
           )}

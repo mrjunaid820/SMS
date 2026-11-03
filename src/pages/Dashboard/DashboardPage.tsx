@@ -222,7 +222,7 @@ export const DashboardPage: React.FC = () => {
                 Welcome Back, Admin!
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-300 mt-0.5">
-                Here's what's happening at {settings.school_name || 'Islamia Public High School'} today.
+                Here's what's happening at {settings.school_name || 'Noor-Ul-Ilm School System'} today.
               </p>
             </div>
           </div>

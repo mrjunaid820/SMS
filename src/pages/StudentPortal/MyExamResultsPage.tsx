@@ -391,11 +391,11 @@ export const MyExamResultsPage: React.FC = () => {
               {/* Header */}
               <div className="text-center border-b-2 border-slate-900 pb-3">
                 <h2 className="text-lg font-black uppercase tracking-wider text-slate-900">
-                  {settings.school_name || 'Islamia Public High School'}
+                  {settings.school_name || 'Noor-Ul-Ilm School System'}
                 </h2>
                 <p className="text-[11px] text-slate-600">{settings.affiliation}</p>
                 <p className="text-[10px] text-slate-500">
-                  Phone: {settings.phone} • {settings.address}
+                  Phone: {settings.phone || '+92 333 5352110'}{settings.landline ? ` • Tel: ${settings.landline}` : ''} • {settings.address || 'Block B, Multi Gardens, B-17, Islamabad, Pakistan'}
                 </p>
                 <div className="mt-2 inline-block bg-slate-900 text-white font-bold px-3 py-0.5 rounded-full text-[11px]">
                   STUDENT TERM EXAMINATION REPORT CARD

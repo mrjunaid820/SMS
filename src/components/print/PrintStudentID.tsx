@@ -15,7 +15,7 @@ export const PrintStudentID: React.FC<PrintStudentIDProps> = ({ student, enrollm
       <div className="absolute top-0 left-0 right-0 h-20 bg-navy-900 flex flex-col items-center justify-center text-white px-4">
         <div className="flex items-center gap-1.5">
           <Shield className="w-4 h-4 text-brand-400" />
-          <h2 className="text-xs font-bold uppercase tracking-wider text-center">{settings.school_name}</h2>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-center">{settings.school_name || 'Noor-Ul-Ilm School System'}</h2>
         </div>
         <p className="text-[10px] text-slate-300 font-medium">STUDENT IDENTITY CARD</p>
       </div>
@@ -63,7 +63,7 @@ export const PrintStudentID: React.FC<PrintStudentIDProps> = ({ student, enrollm
       <div className="pt-2 border-t border-slate-200 flex justify-between items-end text-[9px] text-slate-500">
         <div>
           <p className="font-mono text-[8px] text-slate-400">ISSUED: 2025-26</p>
-          <p className="font-semibold text-slate-600">{settings.phone}</p>
+          <p className="font-semibold text-slate-600">{settings.phone || '+92 333 5352110'}</p>
         </div>
         <div className="text-center">
           <div className="w-20 border-b border-slate-400 mb-0.5" />

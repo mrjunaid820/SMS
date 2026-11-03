@@ -1136,7 +1136,7 @@ export const EventsAnnouncementsPage: React.FC = () => {
             <div className="border-b border-slate-200 dark:border-slate-800 pb-3 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                  {settings.school_name || 'Islamia Public High School'}
+                  {settings.school_name || 'Noor-Ul-Ilm School System'}
                 </h4>
                 <p className="text-[11px] text-slate-400">Institutional Administration Office Circular</p>
               </div>

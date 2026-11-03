@@ -332,7 +332,7 @@ export const MyDuesPage: React.FC = () => {
               <div className="flex justify-between">
                 <span className="text-slate-500">Account Title:</span>
                 <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  {settings.school_name || 'Islamia Public High School'}
+                  {settings.school_name || 'Noor-Ul-Ilm School System'}
                 </span>
               </div>
               <div className="flex justify-between">

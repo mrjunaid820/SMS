@@ -299,8 +299,13 @@ export interface SchoolSettings {
   registration_number?: string;
   affiliation?: string;
   phone?: string;
+  landline?: string;
   email?: string;
+  website?: string;
   address?: string;
+  country?: string;
+  timezone?: string;
+  currency_code?: string;
   principal_name?: string;
   logo_url?: string;
   currency_symbol: string;

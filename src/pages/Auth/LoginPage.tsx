@@ -66,7 +66,7 @@ export const LoginPage: React.FC = () => {
             <Shield className="w-8 h-8 text-brand-400" />
           </div>
           <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            {settings.school_name || 'Islamia Public High School'}
+            {settings.school_name || 'Noor-Ul-Ilm School System'}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Institutional Administration, Faculty & Student Portal
@@ -98,7 +98,7 @@ export const LoginPage: React.FC = () => {
             label="Account Email Address"
             type="email"
             required
-            placeholder="e.g. user@islamiapublic.edu.pk"
+            placeholder="e.g. user@noorulilm.info"
             leftIcon={<Mail className="w-4 h-4" />}
             value={email}
             onChange={(e) => setEmail(e.target.value)}

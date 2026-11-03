@@ -11,7 +11,7 @@ export const SchoolEmblem: React.FC<SchoolEmblemProps> = ({
   className = '',
   size = 56,
   logoUrl,
-  schoolName = 'Islamia Public High School',
+  schoolName = 'Noor-Ul-Ilm School System',
 }) => {
   if (logoUrl) {
     return (
@@ -24,7 +24,7 @@ export const SchoolEmblem: React.FC<SchoolEmblemProps> = ({
     );
   }
 
-  // High-fidelity vector School Crest matching Islamia Public High School reference
+  // Institutional vector School Crest
   return (
     <div
       className={`relative inline-flex items-center justify-center shrink-0 ${className}`}

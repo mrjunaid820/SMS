@@ -108,7 +108,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ isOpen, onClose }) => {
             <SchoolEmblem size={36} logoUrl={settings.logo_url} schoolName={settings.school_name} />
             <div className="truncate">
               <h2 className="text-xs font-bold text-white truncate leading-tight">
-                {settings.school_name || 'Islamia Public High School'}
+                {settings.school_name || 'Noor-Ul-Ilm School System'}
               </h2>
               <span className="text-[10px] text-blue-300 font-medium capitalize">{role} Portal</span>
             </div>
