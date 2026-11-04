@@ -225,18 +225,30 @@ serve(async (req: Request) => {
     }
 
     // ACTION: SET_TEMPORARY_PASSWORD (Students & Teachers)
-    if (action === 'set_temporary_password') {
-      const targetUserId = userId || body.profileId;
+    if (action === 'set_temporary_password' || action === 'set_student_password' || action === 'reset_password') {
+      let targetUserId = userId || body.profileId;
+      if (!targetUserId && studentId) {
+        const { data: sData } = await adminSupabase
+          .from('students')
+          .select('profile_id')
+          .eq('id', studentId)
+          .maybeSingle();
+        if (sData?.profile_id) {
+          targetUserId = sData.profile_id;
+        }
+      }
+
       if (!targetUserId) {
         return new Response(
-          JSON.stringify({ error: 'Validation Error: User ID is required.' }),
+          JSON.stringify({ error: 'Validation Error: User ID or linked Student profile ID is required.' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      if (!temporaryPassword || temporaryPassword.length < 6) {
+      const newPasswordToSet = temporaryPassword || body.password || body.newPassword;
+      if (!newPasswordToSet || newPasswordToSet.length < 6) {
         return new Response(
-          JSON.stringify({ error: 'Validation Error: Temporary password must be at least 6 characters long.' }),
+          JSON.stringify({ error: 'Validation Error: Password must be at least 6 characters long.' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -257,7 +269,8 @@ serve(async (req: Request) => {
 
       // Update password via Supabase Admin Auth API
       const { error: pwdErr } = await adminSupabase.auth.admin.updateUserById(targetUserId, {
-        password: temporaryPassword,
+        password: newPasswordToSet,
+        email_confirm: true,
       });
 
       if (pwdErr) {

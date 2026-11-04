@@ -20,6 +20,7 @@ import {
   Upload,
   CreditCard,
   Eye,
+  EyeOff,
   Archive,
   RotateCcw,
   Printer,
@@ -70,7 +71,11 @@ export const StudentsPage: React.FC = () => {
   const [portalStudent, setPortalStudent] = useState<Student | null>(null);
   const [portalEmail, setPortalEmail] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
+  const [portalConfirmPassword, setPortalConfirmPassword] = useState('');
+  const [showPortalPassword, setShowPortalPassword] = useState(false);
+  const [showPortalConfirmPassword, setShowPortalConfirmPassword] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [portalPasswordLoading, setPortalPasswordLoading] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalSuccess, setPortalSuccess] = useState<string | null>(null);
 
@@ -438,7 +443,15 @@ export const StudentsPage: React.FC = () => {
     setPortalStudent(student);
     setPortalError(null);
     setPortalSuccess(null);
-    setPortalPassword('Student123!');
+    setShowPortalPassword(false);
+    setShowPortalConfirmPassword(false);
+    if (student.profile_id || student.email) {
+      setPortalPassword('');
+      setPortalConfirmPassword('');
+    } else {
+      setPortalPassword('Student123!');
+      setPortalConfirmPassword('Student123!');
+    }
     if (student.email) {
       setPortalEmail(student.email.trim());
     } else {
@@ -477,6 +490,8 @@ export const StudentsPage: React.FC = () => {
       setPortalSuccess(`Portal account provisioned successfully! Login email: ${res.profile.email}. Initial password: ${portalPassword}`);
       await loadData();
       setPortalStudent((prev) => (prev ? { ...prev, profile_id: res.profile.id, email: res.profile.email } : null));
+      setPortalPassword('');
+      setPortalConfirmPassword('');
     } catch (err: any) {
       setPortalError(err.message || 'Failed to provision portal account.');
     } finally {
@@ -489,24 +504,45 @@ export const StudentsPage: React.FC = () => {
     setPortalError(null);
     setPortalSuccess(null);
 
-    if (!portalPassword || portalPassword.length < 6) {
-      setPortalError('New password must be at least 6 characters.');
+    const cleanPassword = portalPassword.trim();
+    const cleanConfirm = portalConfirmPassword.trim();
+
+    if (!cleanPassword) {
+      setPortalError('Please enter a new password.');
       return;
     }
 
-    setPortalLoading(true);
+    if (cleanPassword.length < 6) {
+      setPortalError('New password must be at least 6 characters in length.');
+      return;
+    }
+
+    if (!cleanConfirm) {
+      setPortalError('Please confirm the new password.');
+      return;
+    }
+
+    if (cleanPassword !== cleanConfirm) {
+      setPortalError('New password and Confirm Password do not match. Please re-enter.');
+      return;
+    }
+
+    setPortalPasswordLoading(true);
     try {
-      await studentApi.resetStudentPassword(
+      const res = await studentApi.resetStudentPassword(
         portalStudent.id,
-        portalPassword,
+        cleanPassword,
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
-      setPortalSuccess(`Password reset successfully for ${portalStudent.full_name}.`);
+      setPortalSuccess(res.message || `Password reset successfully for ${portalStudent.full_name}.`);
       setPortalPassword('');
+      setPortalConfirmPassword('');
+      setShowPortalPassword(false);
+      setShowPortalConfirmPassword(false);
     } catch (err: any) {
       setPortalError(err.message || 'Failed to reset password.');
     } finally {
-      setPortalLoading(false);
+      setPortalPasswordLoading(false);
     }
   };
 
@@ -1942,6 +1978,10 @@ export const StudentsPage: React.FC = () => {
           setIsPortalModalOpen(false);
           setPortalError(null);
           setPortalSuccess(null);
+          setPortalPassword('');
+          setPortalConfirmPassword('');
+          setShowPortalPassword(false);
+          setShowPortalConfirmPassword(false);
         }}
         title={`Student Portal Access — ${portalStudent?.full_name || ''}`}
         size="md"
@@ -1962,14 +2002,16 @@ export const StudentsPage: React.FC = () => {
           </div>
 
           {portalError && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium">
-              {portalError}
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+              <span>{portalError}</span>
             </div>
           )}
 
           {portalSuccess && (
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-              {portalSuccess}
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <span>{portalSuccess}</span>
             </div>
           )}
 
@@ -1988,27 +2030,93 @@ export const StudentsPage: React.FC = () => {
                 />
               </div>
 
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  Reset Account Password
-                </h4>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter new password (min 6 chars)"
-                    type="password"
-                    value={portalPassword}
-                    onChange={(e) => setPortalPassword(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    isLoading={portalLoading}
-                    onClick={handleResetPortalPassword}
-                    disabled={!portalPassword || portalPassword.length < 6}
-                  >
-                    Set Password
-                  </Button>
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-navy-700 dark:text-sky-400" />
+                    Reset Account Password
+                  </h4>
+                  <span className="text-[11px] text-slate-500">Min 6 characters</span>
+                </div>
+
+                <div className="space-y-3 bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      New Password <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPortalPassword ? 'text' : 'password'}
+                        value={portalPassword}
+                        onChange={(e) => setPortalPassword(e.target.value)}
+                        placeholder="Enter new password (min 6 characters)"
+                        className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPortalPassword(!showPortalPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
+                        aria-label={showPortalPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Confirm Password <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPortalConfirmPassword ? 'text' : 'password'}
+                        value={portalConfirmPassword}
+                        onChange={(e) => setPortalConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPortalConfirmPassword(!showPortalConfirmPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
+                        aria-label={showPortalConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                      >
+                        {showPortalConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {portalPassword && portalConfirmPassword && portalPassword !== portalConfirmPassword && (
+                    <div className="flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Passwords do not match</span>
+                    </div>
+                  )}
+
+                  {portalPassword && portalPassword.length > 0 && portalPassword.length < 6 && (
+                    <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Password must be at least 6 characters</span>
+                    </div>
+                  )}
+
+                  <div className="pt-1 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      isLoading={portalPasswordLoading}
+                      onClick={handleResetPortalPassword}
+                      disabled={
+                        !portalPassword ||
+                        !portalConfirmPassword ||
+                        portalPassword.length < 6 ||
+                        portalPassword !== portalConfirmPassword
+                      }
+                    >
+                      <KeyRound className="w-3.5 h-3.5 mr-1.5" />
+                      Set Password
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -2048,14 +2156,29 @@ export const StudentsPage: React.FC = () => {
                 placeholder="e.g. student@school.edu.pk"
               />
 
-              <Input
-                label="Initial Password"
-                type="password"
-                required
-                value={portalPassword}
-                onChange={(e) => setPortalPassword(e.target.value)}
-                placeholder="Enter password (min 6 characters)"
-              />
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Initial Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPortalPassword ? 'text' : 'password'}
+                    required
+                    value={portalPassword}
+                    onChange={(e) => setPortalPassword(e.target.value)}
+                    placeholder="Enter password (min 6 characters)"
+                    className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPortalPassword(!showPortalPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
+                    aria-label={showPortalPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
 
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
                 <Button

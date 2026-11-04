@@ -1022,7 +1022,7 @@ export const teacherApi = {
       throw new Error('Unauthorized: Only administrators are authorized to reset teacher passwords.');
     }
 
-    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+    if (options.temporaryPassword !== undefined && options.temporaryPassword.length < 6) {
       throw new Error('Validation Error: Temporary password must be at least 6 characters.');
     }
 
@@ -2003,7 +2003,7 @@ export const studentApi = {
       throw new Error('Validation Error: A valid student email address is required.');
     }
 
-    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+    if (options.temporaryPassword !== undefined && options.temporaryPassword.length < 6) {
       throw new Error('Validation Error: Temporary password must be at least 6 characters.');
     }
 
@@ -2162,7 +2162,8 @@ export const studentApi = {
     optionsOrPassword: string | { temporaryPassword?: string; sendResetLink?: boolean },
     actor?: { id?: string; name?: string; role?: string }
   ): Promise<{ success: boolean; message: string; profileId?: string }> => {
-    if (actor && actor.role !== 'admin') {
+    const effectiveRole = actor?.role || getStorage<any>('sms_current_user', null)?.role;
+    if (effectiveRole && effectiveRole !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to reset student passwords.');
     }
 
@@ -2171,7 +2172,7 @@ export const studentApi = {
         ? { temporaryPassword: optionsOrPassword }
         : optionsOrPassword || {};
 
-    if (options.temporaryPassword && options.temporaryPassword.length < 6) {
+    if (options.temporaryPassword !== undefined && options.temporaryPassword.length < 6) {
       throw new Error('Validation Error: Temporary password must be at least 6 characters.');
     }
 
@@ -2221,10 +2222,17 @@ export const studentApi = {
           });
 
           if (!rpcErr && rpcData && rpcData.success) {
+            try {
+              const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+              if (targetProfileId) passMap[targetProfileId] = options.temporaryPassword;
+              if (targetEmail) passMap[targetEmail.toLowerCase()] = options.temporaryPassword;
+              localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+            } catch {}
+
             return {
               success: true,
               profileId: targetProfileId || undefined,
-              message: `Password updated successfully for ${liveStudent.full_name}. Student can log in immediately with the new password.`,
+              message: rpcData.message || `Password updated successfully for ${liveStudent.full_name}. Student can log in immediately with the new password.`,
             };
           } else if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('function public.admin_reset_student_password')) {
             throw new Error(rpcErr.message);
@@ -2243,12 +2251,20 @@ export const studentApi = {
             body: {
               action: 'set_temporary_password',
               userId: targetProfileId,
+              studentId: studentId,
               temporaryPassword: options.temporaryPassword,
               role: 'student',
             },
           });
 
-          if (!edgeErr && edgeData && edgeData.success) {
+          if (!edgeErr && edgeData && (edgeData.success || !edgeData.error)) {
+            try {
+              const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+              if (targetProfileId) passMap[targetProfileId] = options.temporaryPassword;
+              if (targetEmail) passMap[targetEmail.toLowerCase()] = options.temporaryPassword;
+              localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+            } catch {}
+
             await logAudit(actor || {}, 'STUDENT_PASSWORD_RESET', 'profiles', targetProfileId, {
               target_student_id: studentId,
               target_email: targetEmail,
@@ -2257,16 +2273,25 @@ export const studentApi = {
             return {
               success: true,
               profileId: targetProfileId,
-              message: `Temporary password successfully assigned for ${liveStudent.full_name}. Active sessions revoked.`,
+              message: edgeData.message || `Temporary password successfully assigned for ${liveStudent.full_name}. Active sessions revoked.`,
             };
+          } else if (edgeErr) {
+            console.warn('Edge function invoke warning:', edgeErr);
           }
         } catch (e) {
           // Edge function unavailable
         }
       }
 
-      // If sendResetLink or if Edge Function was unavailable, dispatch email reset link
-      if (targetEmail) {
+      // If temporaryPassword was requested but neither RPC nor Edge function could apply it:
+      if (options.temporaryPassword) {
+        throw new Error(
+          'Failed to update student password. Please verify database permissions or ensure the administrative service is available.'
+        );
+      }
+
+      // If explicit reset link requested
+      if (options.sendResetLink && targetEmail) {
         const { error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail);
         if (resetErr) {
           throw new Error(`Password reset failed: ${resetErr.message}`);
@@ -2281,9 +2306,7 @@ export const studentApi = {
         return {
           success: true,
           profileId: targetProfileId,
-          message: options.temporaryPassword
-            ? `Direct password update requires the deployed "admin-manage-user" Edge Function. An authorized password reset link was dispatched to ${targetEmail} instead.`
-            : `Authorized password reset link dispatched to ${targetEmail}.`,
+          message: `Authorized password reset link dispatched to ${targetEmail}.`,
         };
       }
 
@@ -2308,6 +2331,7 @@ export const studentApi = {
         const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
         passMap[profile.id] = options.temporaryPassword;
         passMap[profile.email.toLowerCase()] = options.temporaryPassword;
+        if (student.email) passMap[student.email.toLowerCase()] = options.temporaryPassword;
         localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
       } catch {}
     }
@@ -2328,7 +2352,7 @@ export const studentApi = {
       success: true,
       profileId: profile.id,
       message: options.temporaryPassword
-        ? `Temporary password successfully assigned for ${student.full_name}. Active sessions revoked.`
+        ? `Password updated successfully for ${student.full_name}. Student can log in immediately with the new password.`
         : `Authorized password reset link dispatched to ${profile.email}.`,
     };
   },
