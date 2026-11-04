@@ -221,8 +221,8 @@ describe('Student Portal Password Management Suite', () => {
       // Student academic and profile data intact
       expect(targetAfter.admission_no).toBe(targetBefore.admission_no);
       expect(targetAfter.full_name).toBe(targetBefore.full_name);
-      expect(targetAfter.class_id).toBe(targetBefore.class_id);
-      expect(targetAfter.section_id).toBe(targetBefore.section_id);
+      expect(targetAfter.guardian_name).toBe(targetBefore.guardian_name);
+      expect(targetAfter.guardian_phone).toBe(targetBefore.guardian_phone);
       expect(targetAfter.profile_id).toBe(targetBefore.profile_id);
       expect(targetAfter.email).toBe(targetBefore.email);
     });
