@@ -37,6 +37,7 @@ import {
   UserX,
   AlertCircle,
   Check,
+  Camera,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
@@ -137,6 +138,8 @@ export const StudentsPage: React.FC = () => {
   } | null>(null);
 
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [photoMessage, setPhotoMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
 
   // Form State for Add
@@ -265,6 +268,48 @@ export const StudentsPage: React.FC = () => {
     setEditError(null);
     setEditSuccess(null);
     setIsEditModalOpen(true);
+  };
+
+  const handleAdminPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedStudent) return;
+    setIsPhotoUploading(true);
+    setPhotoMessage(null);
+    try {
+      const res = await studentApi.uploadStudentPhoto(selectedStudent.id, file, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role || 'admin',
+      });
+      setPhotoMessage({ type: 'success', text: 'Student photo updated successfully!' });
+      setSelectedStudent(res.student);
+      setStudents((prev) => prev.map((s) => (s.id === res.student.id ? res.student : s)));
+    } catch (err: any) {
+      setPhotoMessage({ type: 'error', text: err.message || 'Failed to upload photo.' });
+    } finally {
+      setIsPhotoUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAdminPhotoRemove = async (studentId: string) => {
+    if (!window.confirm('Are you sure you want to remove this photo and revert to the default avatar?')) return;
+    setIsPhotoUploading(true);
+    setPhotoMessage(null);
+    try {
+      const res = await studentApi.removeStudentPhoto(studentId, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role || 'admin',
+      });
+      setPhotoMessage({ type: 'success', text: res.message });
+      setSelectedStudent(res.student);
+      setStudents((prev) => prev.map((s) => (s.id === res.student.id ? res.student : s)));
+    } catch (err: any) {
+      setPhotoMessage({ type: 'error', text: err.message || 'Failed to remove photo.' });
+    } finally {
+      setIsPhotoUploading(false);
+    }
   };
 
   const handleUpdateStudent = async (e: React.FormEvent) => {
@@ -1399,24 +1444,91 @@ export const StudentsPage: React.FC = () => {
       >
         {selectedStudent && (
           <div className="space-y-6">
-            <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-              <div className="w-16 h-16 rounded-full bg-navy-900 text-white flex items-center justify-center font-bold text-xl">
-                {selectedStudent.full_name[0]}
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                  {selectedStudent.full_name}
-                </h3>
-                <p className="text-xs font-mono text-brand-600 dark:text-brand-400 font-semibold">
-                  {selectedStudent.admission_no}
-                </p>
-                <div className="flex gap-2 mt-1">
-                  <Badge variant={selectedStudent.is_active ? 'success' : 'danger'}>
-                    {selectedStudent.is_active ? 'Active Enrollment' : 'Archived'}
-                  </Badge>
-                  <Badge variant="default">Blood Group: {selectedStudent.blood_group || 'N/A'}</Badge>
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative shrink-0">
+                    {selectedStudent.photo_url ? (
+                      <img
+                        src={selectedStudent.photo_url}
+                        alt={selectedStudent.full_name}
+                        className="w-16 h-16 rounded-full object-cover border-2 border-brand-500 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-navy-900 text-white flex items-center justify-center font-bold text-xl shadow-sm">
+                        {selectedStudent.full_name[0]}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                      {selectedStudent.full_name}
+                    </h3>
+                    <p className="text-xs font-mono text-brand-600 dark:text-brand-400 font-semibold">
+                      {selectedStudent.admission_no}
+                    </p>
+                    <div className="flex gap-2 mt-1">
+                      <Badge variant={selectedStudent.is_active ? 'success' : 'danger'}>
+                        {selectedStudent.is_active ? 'Active Enrollment' : 'Archived'}
+                      </Badge>
+                      <Badge variant="default">Blood Group: {selectedStudent.blood_group || 'N/A'}</Badge>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Admin Photo Management Controls */}
+                {isAdmin && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      id={`admin-student-photo-${selectedStudent.id}`}
+                      className="hidden"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={handleAdminPhotoUpload}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isLoading={isPhotoUploading}
+                      onClick={() => document.getElementById(`admin-student-photo-${selectedStudent.id}`)?.click()}
+                      title="Upload or replace student photo"
+                    >
+                      <Camera className="w-3.5 h-3.5 mr-1.5" />
+                      {selectedStudent.photo_url ? 'Change Photo' : 'Upload Photo'}
+                    </Button>
+                    {selectedStudent.photo_url && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        isLoading={isPhotoUploading}
+                        onClick={() => handleAdminPhotoRemove(selectedStudent.id)}
+                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                        title="Remove student photo and revert to default avatar"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {photoMessage && (
+                <div
+                  className={`p-2 rounded-lg text-xs flex items-center gap-2 ${
+                    photoMessage.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-900'
+                      : 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200 border border-rose-200 dark:border-rose-900'
+                  }`}
+                >
+                  {photoMessage.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  )}
+                  <span>{photoMessage.text}</span>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs">
@@ -1591,12 +1703,79 @@ export const StudentsPage: React.FC = () => {
               onChange={(e) => setEditFormData({ ...editFormData, emergency_contact: e.target.value })}
             />
 
-            <Input
-              label="Student Photo URL (Optional)"
-              placeholder="https://example.com/photo.jpg"
-              value={editFormData.photo_url}
-              onChange={(e) => setEditFormData({ ...editFormData, photo_url: e.target.value })}
-            />
+            <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Student Profile Photo
+              </label>
+              <div className="flex items-center gap-3">
+                {editFormData.photo_url ? (
+                  <img
+                    src={editFormData.photo_url}
+                    alt="Preview"
+                    className="w-12 h-12 rounded-full object-cover border border-slate-300 dark:border-slate-700"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 font-bold">
+                    {editFormData.full_name?.[0] || '?'}
+                  </div>
+                )}
+                <div className="flex-1 space-y-1">
+                  <input
+                    type="file"
+                    id="edit-student-photo-file-picker"
+                    className="hidden"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file || !selectedStudent) return;
+                      try {
+                        const res = await studentApi.uploadStudentPhoto(selectedStudent.id, file, {
+                          id: user?.id,
+                          name: user?.full_name,
+                          role: user?.role || 'admin',
+                        });
+                        setEditFormData((prev) => ({ ...prev, photo_url: res.photo_url }));
+                        setSelectedStudent(res.student);
+                        setStudents((prev) => prev.map((s) => (s.id === res.student.id ? res.student : s)));
+                      } catch (err: any) {
+                        alert(err.message || 'Failed to upload photo');
+                      } finally {
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => document.getElementById('edit-student-photo-file-picker')?.click()}
+                    >
+                      <Camera className="w-3.5 h-3.5 mr-1" />
+                      Browse Image File...
+                    </Button>
+                    {editFormData.photo_url && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setEditFormData((prev) => ({ ...prev, photo_url: '' }))}
+                        className="text-slate-500 hover:text-slate-700 text-xs"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400">JPG, PNG, WEBP or GIF up to 5MB</p>
+                </div>
+              </div>
+              <Input
+                label="Or Image URL (Optional)"
+                placeholder="https://example.com/photo.jpg"
+                value={editFormData.photo_url}
+                onChange={(e) => setEditFormData({ ...editFormData, photo_url: e.target.value })}
+              />
+            </div>
 
             <Select
               label="Class"

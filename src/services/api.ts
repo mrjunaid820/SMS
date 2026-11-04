@@ -132,6 +132,27 @@ export async function logAudit(
   setStorage('audit_logs', [newLog, ...logs]);
 }
 
+/**
+ * Extracts the relative storage object path from a Supabase Storage public URL
+ * e.g. "https://<proj>.supabase.co/storage/v1/object/public/student-avatars/avatars/abc-123.png"
+ * returns "avatars/abc-123.png"
+ */
+export function extractStoragePath(url?: string | null, bucket = 'student-avatars'): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = url.indexOf(marker);
+  if (idx !== -1) {
+    return decodeURIComponent(url.substring(idx + marker.length));
+  }
+  const altMarker = `/${bucket}/`;
+  const altIdx = url.indexOf(altMarker);
+  if (altIdx !== -1) {
+    const candidate = decodeURIComponent(url.substring(altIdx + altMarker.length));
+    if (candidate.startsWith('avatars/') || !candidate.includes('/')) return candidate;
+  }
+  return null;
+}
+
 // -------------------------------------------------------------
 // 1. SETTINGS & SESSIONS
 // -------------------------------------------------------------
@@ -3044,6 +3065,258 @@ export const studentApi = {
       message: `Student "${student.full_name}" (Admission No: ${student.admission_no}) has been safely deactivated and removed from the active roster. All historical records have been preserved.`,
       student,
     };
+  },
+
+  uploadStudentPhoto: async (
+    studentId: string,
+    fileOrUrl: File | string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ photo_url: string; student: Student }> => {
+    // 1. Fetch student
+    let student: Student | null = null;
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('students').select('*').eq('id', studentId).maybeSingle();
+      if (error || !data) {
+        throw new Error(`Student record not found for ID: ${studentId}`);
+      }
+      student = data as Student;
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      student = students.find((s) => s.id === studentId) || null;
+      if (!student) {
+        throw new Error(`Student record not found for ID: ${studentId}`);
+      }
+    }
+
+    // 2. Authorization check
+    if (actor) {
+      if (actor.role === 'admin') {
+        // Admin is authorized to upload or replace photo for any student
+      } else if (actor.role === 'student') {
+        // Student can only upload for their own profile/student record
+        const isOwn =
+          (student.profile_id && actor.id === student.profile_id) ||
+          actor.id === student.id ||
+          (student.email && actor.id === student.email);
+        if (!isOwn) {
+          throw new Error('Unauthorized: Students can only upload or update their own profile picture.');
+        }
+      } else {
+        throw new Error('Unauthorized: Teachers and unauthorized users cannot upload student photos.');
+      }
+    }
+
+    let photoUrl = '';
+    let uploadedStoragePath: string | null = null;
+    const oldPhotoUrl = student.photo_url;
+
+    if (typeof fileOrUrl === 'string') {
+      photoUrl = fileOrUrl.trim();
+    } else {
+      const file = fileOrUrl;
+      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || '' : '';
+      const validExts = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+
+      if ((file.type && !validTypes.includes(file.type)) || (ext && !validExts.includes(ext))) {
+        throw new Error('Invalid file format. Please upload a JPG, JPEG, PNG, WEBP, or GIF image.');
+      }
+
+      const maxSize = 5 * 1024 * 1024; // 5 MB
+      if (file.size > maxSize) {
+        throw new Error('File size exceeds the 5MB limit. Please choose a smaller image.');
+      }
+
+      if (isLiveSupabaseConfigured()) {
+        const fileExt = ext || (file.type ? file.type.split('/')[1] : 'png');
+        const fileName = `${student.id}-${Date.now()}.${fileExt}`;
+        const filePath = `avatars/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('student-avatars')
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload image: ${uploadError.message}`);
+        }
+
+        uploadedStoragePath = filePath;
+
+        const { data: publicData } = supabase.storage
+          .from('student-avatars')
+          .getPublicUrl(filePath);
+
+        photoUrl = publicData.publicUrl;
+      } else {
+        // Local/mock environment fallback
+        if (typeof FileReader !== 'undefined') {
+          photoUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to read image file.'));
+            reader.readAsDataURL(file);
+          });
+        } else if (typeof (file as any).arrayBuffer === 'function') {
+          const buf = await (file as any).arrayBuffer();
+          const b64 = Buffer.from(buf).toString('base64');
+          photoUrl = `data:${file.type || 'image/png'};base64,${b64}`;
+        } else {
+          photoUrl = `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop`;
+        }
+      }
+    }
+
+    // 3. Database integration: Save photo_url in students table
+    if (isLiveSupabaseConfigured()) {
+      const { data: updatedData, error: dbError } = await supabase
+        .from('students')
+        .update({ photo_url: photoUrl, updated_at: new Date().toISOString() })
+        .eq('id', student.id)
+        .select()
+        .single();
+
+      if (dbError) {
+        // Rollback newly uploaded storage file if database update fails
+        if (uploadedStoragePath) {
+          try {
+            await supabase.storage.from('student-avatars').remove([uploadedStoragePath]);
+          } catch (cleanupErr) {
+            console.warn('Failed to cleanup orphaned storage file on db error:', cleanupErr);
+          }
+        }
+        throw new Error(`Failed to update student profile photo: ${dbError.message}`);
+      }
+
+      if (updatedData) {
+        student = updatedData as Student;
+      }
+
+      // Safe replacement: Clean up old storage file if present and different
+      if (oldPhotoUrl && oldPhotoUrl !== photoUrl) {
+        const oldPath = extractStoragePath(oldPhotoUrl, 'student-avatars');
+        if (oldPath && oldPath !== uploadedStoragePath) {
+          try {
+            await supabase.storage.from('student-avatars').remove([oldPath]);
+          } catch (e) {
+            console.warn('Could not remove previous avatar file from storage:', e);
+          }
+        }
+      }
+    }
+
+    // 4. Update local storage in all modes to ensure local cache consistency
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const idx = students.findIndex((s) => s.id === student!.id);
+    if (idx !== -1) {
+      students[idx] = { ...students[idx], photo_url: photoUrl, updated_at: new Date().toISOString() };
+      setStorage('students', [...students]);
+      student = students[idx];
+    } else {
+      student = { ...student, photo_url: photoUrl };
+    }
+
+    // 5. Audit log
+    await logAudit(
+      actor || { id: student.profile_id, name: student.full_name, role: 'admin' },
+      'STUDENT_PHOTO_UPLOADED',
+      'students',
+      student.id,
+      { previous: oldPhotoUrl, updated: photoUrl }
+    );
+
+    return { photo_url: photoUrl, student };
+  },
+
+  removeStudentPhoto: async (
+    studentId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string; student: Student }> => {
+    // 1. Fetch student
+    let student: Student | null = null;
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase.from('students').select('*').eq('id', studentId).maybeSingle();
+      if (error || !data) {
+        throw new Error(`Student record not found for ID: ${studentId}`);
+      }
+      student = data as Student;
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      student = students.find((s) => s.id === studentId) || null;
+      if (!student) {
+        throw new Error(`Student record not found for ID: ${studentId}`);
+      }
+    }
+
+    // 2. Authorization check
+    if (actor) {
+      if (actor.role === 'admin') {
+        // Admin is authorized
+      } else if (actor.role === 'student') {
+        const isOwn =
+          (student.profile_id && actor.id === student.profile_id) ||
+          actor.id === student.id ||
+          (student.email && actor.id === student.email);
+        if (!isOwn) {
+          throw new Error('Unauthorized: Students can only remove their own profile picture.');
+        }
+      } else {
+        throw new Error('Unauthorized: Teachers and unauthorized users cannot remove student photos.');
+      }
+    }
+
+    const oldPhotoUrl = student.photo_url;
+
+    // 3. Update database
+    if (isLiveSupabaseConfigured()) {
+      const { data: updatedData, error: dbError } = await supabase
+        .from('students')
+        .update({ photo_url: null, updated_at: new Date().toISOString() })
+        .eq('id', student.id)
+        .select()
+        .single();
+
+      if (dbError) {
+        throw new Error(`Failed to remove student profile photo: ${dbError.message}`);
+      }
+
+      if (updatedData) {
+        student = updatedData as Student;
+      }
+
+      // Clean up storage file
+      if (oldPhotoUrl) {
+        const oldPath = extractStoragePath(oldPhotoUrl, 'student-avatars');
+        if (oldPath) {
+          try {
+            await supabase.storage.from('student-avatars').remove([oldPath]);
+          } catch (e) {
+            console.warn('Could not remove avatar from storage:', e);
+          }
+        }
+      }
+    }
+
+    // 4. Update local storage
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const idx = students.findIndex((s) => s.id === student!.id);
+    if (idx !== -1) {
+      students[idx] = { ...students[idx], photo_url: undefined, updated_at: new Date().toISOString() };
+      setStorage('students', [...students]);
+      student = students[idx];
+    } else {
+      student = { ...student, photo_url: undefined };
+    }
+
+    // 5. Audit log
+    await logAudit(
+      actor || { id: student.profile_id, name: student.full_name, role: 'admin' },
+      'STUDENT_PHOTO_REMOVED',
+      'students',
+      student.id,
+      { previous: oldPhotoUrl, updated: null }
+    );
+
+    return { success: true, message: 'Student photo removed successfully.', student };
   },
 };
 
@@ -5966,98 +6239,32 @@ export const studentPortalApi = {
       throw new Error('Student record not found.');
     }
 
-    // Authorization check: student can only update their own avatar; admins can update any student
-    if (actor) {
-      if (actor.role === 'admin') {
-        // Admin is authorized
-      } else if (actor.role === 'student') {
-        if (student.profile_id && actor.id !== student.profile_id && actor.id !== profileId) {
-          throw new Error('Unauthorized: Students can only update their own profile picture.');
-        }
-      } else {
-        throw new Error('Unauthorized: Only students or administrators are authorized to update profile pictures.');
-      }
+    const effectiveActor = actor || {
+      id: profileId,
+      name: student.full_name,
+      role: 'student',
+    };
+
+    const result = await studentApi.uploadStudentPhoto(student.id, fileOrUrl, effectiveActor);
+    return { photo_url: result.photo_url };
+  },
+
+  removeMyAvatar: async (
+    profileId: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    const { student } = await studentPortalApi.getStudentSelf(profileId);
+    if (!student) {
+      throw new Error('Student record not found.');
     }
 
-    let photoUrl = '';
-    if (typeof fileOrUrl === 'string') {
-      photoUrl = fileOrUrl.trim();
-    } else {
-      const file = fileOrUrl;
-      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-      if (file.type && !validTypes.includes(file.type)) {
-        throw new Error('Invalid file format. Please upload a JPG, PNG, WEBP, or GIF image.');
-      }
-      const maxSize = 5 * 1024 * 1024; // 5 MB
-      if (file.size > maxSize) {
-        throw new Error('File size exceeds the 5MB limit. Please choose a smaller image.');
-      }
+    const effectiveActor = actor || {
+      id: profileId,
+      name: student.full_name,
+      role: 'student',
+    };
 
-      if (isLiveSupabaseConfigured()) {
-        const fileExt = file.name ? file.name.split('.').pop() || 'png' : 'png';
-        const fileName = `${student.id}-${Date.now()}.${fileExt}`;
-        const filePath = `avatars/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('student-avatars')
-          .upload(filePath, file, { upsert: true });
-
-        if (uploadError) {
-          throw new Error(`Failed to upload image: ${uploadError.message}`);
-        }
-
-        const { data: publicData } = supabase.storage
-          .from('student-avatars')
-          .getPublicUrl(filePath);
-
-        photoUrl = publicData.publicUrl;
-      } else {
-        // Local/mock environment fallback
-        if (typeof FileReader !== 'undefined') {
-          photoUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error('Failed to read image file.'));
-            reader.readAsDataURL(file);
-          });
-        } else if (typeof (file as any).arrayBuffer === 'function') {
-          const buf = await (file as any).arrayBuffer();
-          const b64 = Buffer.from(buf).toString('base64');
-          photoUrl = `data:${file.type || 'image/png'};base64,${b64}`;
-        } else {
-          photoUrl = `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop`;
-        }
-      }
-    }
-
-    if (isLiveSupabaseConfigured()) {
-      const { error: dbError } = await supabase
-        .from('students')
-        .update({ photo_url: photoUrl, updated_at: new Date().toISOString() })
-        .eq('id', student.id);
-
-      if (dbError) {
-        throw new Error(`Failed to update student profile photo: ${dbError.message}`);
-      }
-    }
-
-    // Update local storage in all modes to ensure local cache consistency
-    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
-    const idx = students.findIndex((s) => s.id === student.id);
-    if (idx !== -1) {
-      students[idx] = { ...students[idx], photo_url: photoUrl, updated_at: new Date().toISOString() };
-      setStorage('students', [...students]);
-    }
-
-    await logAudit(
-      actor || { id: student.profile_id, name: student.full_name, role: 'student' },
-      'STUDENT_AVATAR_UPDATED',
-      'students',
-      student.id,
-      { previous: student.photo_url, updated: photoUrl }
-    );
-
-    return { photo_url: photoUrl };
+    return await studentApi.removeStudentPhoto(student.id, effectiveActor);
   },
 
   getMyAttendance: async (

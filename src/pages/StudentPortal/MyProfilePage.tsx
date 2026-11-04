@@ -20,6 +20,7 @@ import {
   Mail,
   Hash,
   School,
+  Trash2,
 } from 'lucide-react';
 
 export const MyProfilePage: React.FC = () => {
@@ -96,6 +97,27 @@ export const MyProfilePage: React.FC = () => {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!window.confirm('Are you sure you want to remove your profile picture?')) return;
+    setIsUploadingAvatar(true);
+    setAvatarError(null);
+    setAvatarSuccess(null);
+    try {
+      const identifier = user?.id || user?.email || '';
+      await studentPortalApi.removeMyAvatar(identifier, {
+        id: user?.id,
+        name: user?.full_name,
+        role: user?.role,
+      });
+      setStudent((prev) => (prev ? { ...prev, photo_url: undefined } : null));
+      setAvatarSuccess('Profile picture removed successfully.');
+    } catch (err: any) {
+      setAvatarError(err.message || 'Failed to remove profile picture. Please try again.');
+    } finally {
+      setIsUploadingAvatar(false);
     }
   };
 
@@ -225,6 +247,20 @@ export const MyProfilePage: React.FC = () => {
                     <Camera className="w-3.5 h-3.5 mr-1.5" />
                     {student.photo_url ? 'Change Photo' : 'Upload Photo'}
                   </Button>
+                  {student.photo_url && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRemoveAvatar}
+                      disabled={isUploadingAvatar}
+                      className="w-full sm:w-auto text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                      title="Remove profile photo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                      Remove
+                    </Button>
+                  )}
                 </div>
               </div>
 
