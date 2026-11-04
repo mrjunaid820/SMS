@@ -1716,29 +1716,82 @@ export const studentApi = {
     return { student: newStudent, enrollment: newEnrollment };
   },
 
-  updateStudent: async (id: string, updates: Partial<Student>, actor?: { id?: string; name?: string; role?: string }): Promise<Student> => {
+  updateStudent: async (
+    id: string,
+    updates: Partial<Student> & { photo_url?: string | null },
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<Student> => {
     if (actor && actor.role !== 'admin') {
       throw new Error('Unauthorized: Only administrators are authorized to edit student records.');
     }
+
+    let existingStudent: Student | null = null;
     if (isLiveSupabaseConfigured()) {
-      const { data, error } = await supabase.from('students').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
-      if (error) throw error;
-      await logAudit(actor || {}, 'STUDENT_UPDATED', 'students', id, updates);
-      return data;
+      const { data: cur } = await supabase.from('students').select('*').eq('id', id).maybeSingle();
+      existingStudent = cur;
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      existingStudent = students.find((s) => s.id === id) || null;
     }
-    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
-    const idx = students.findIndex(s => s.id === id);
-    if (idx === -1) throw new Error('Student not found');
-    const updated = { ...students[idx], ...updates, updated_at: new Date().toISOString() };
-    students[idx] = updated;
-    setStorage('students', [...students]);
-    await logAudit(actor || {}, 'STUDENT_UPDATED', 'students', id, updates);
+    const oldPhotoUrl = existingStudent?.photo_url || null;
+
+    const normalizedUpdates: Record<string, any> = {
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+    if ('photo_url' in updates) {
+      const p = updates.photo_url;
+      normalizedUpdates.photo_url = p && typeof p === 'string' && p.trim().length > 0 ? p.trim() : null;
+    }
+
+    let updated: Student;
+    if (isLiveSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('students')
+        .update(normalizedUpdates)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      updated = data;
+
+      // Storage cleanup if photo was cleared
+      if (oldPhotoUrl && normalizedUpdates.photo_url === null && normalizedUpdates.photo_url !== oldPhotoUrl) {
+        const oldPath = extractStoragePath(oldPhotoUrl, 'student-avatars');
+        if (oldPath) {
+          try {
+            await supabase.storage.from('student-avatars').remove([oldPath]);
+          } catch (storageErr) {
+            console.warn('Storage file cleanup warning (non-blocking):', storageErr);
+          }
+        }
+      }
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      const idx = students.findIndex((s) => s.id === id);
+      if (idx === -1) throw new Error('Student not found');
+      updated = { ...students[idx], ...normalizedUpdates };
+      if (normalizedUpdates.photo_url === null) {
+        delete (updated as any).photo_url;
+        updated.photo_url = undefined;
+      }
+      students[idx] = updated;
+      setStorage('students', [...students]);
+    }
+
+    await logAudit(
+      actor || {},
+      'photo_url' in updates && normalizedUpdates.photo_url === null && oldPhotoUrl ? 'STUDENT_PHOTO_REMOVED' : 'STUDENT_UPDATED',
+      'students',
+      id,
+      updates
+    );
     return updated;
   },
 
   updateStudentWithEnrollment: async (
     studentId: string,
-    studentUpdates: Partial<Student>,
+    studentUpdates: Partial<Student> & { photo_url?: string | null },
     newSectionId?: string,
     sessionId?: string,
     actor?: { id?: string; name?: string; role?: string }
@@ -1761,19 +1814,48 @@ export const studentApi = {
       throw new Error('Validation Error: Residential address is required.');
     }
 
+    // Capture existing student to detect old photo
+    let existingStudent: Student | null = null;
+    if (isLiveSupabaseConfigured()) {
+      const { data: cur } = await supabase.from('students').select('*').eq('id', studentId).maybeSingle();
+      existingStudent = cur;
+    } else {
+      const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+      existingStudent = students.find((s) => s.id === studentId) || null;
+    }
+    const oldPhotoUrl = existingStudent?.photo_url || null;
+
+    const normalizedUpdates: Record<string, any> = {
+      ...studentUpdates,
+      updated_at: new Date().toISOString(),
+    };
+    if ('photo_url' in studentUpdates) {
+      const p = studentUpdates.photo_url;
+      normalizedUpdates.photo_url = p && typeof p === 'string' && p.trim().length > 0 ? p.trim() : null;
+    }
+
     let updatedStudent: Student;
     if (isLiveSupabaseConfigured()) {
       const { data, error } = await supabase
         .from('students')
-        .update({
-          ...studentUpdates,
-          updated_at: new Date().toISOString(),
-        })
+        .update(normalizedUpdates)
         .eq('id', studentId)
         .select()
         .single();
       if (error) throw error;
       updatedStudent = data;
+
+      // Storage cleanup if photo was cleared
+      if (oldPhotoUrl && normalizedUpdates.photo_url === null && normalizedUpdates.photo_url !== oldPhotoUrl) {
+        const oldPath = extractStoragePath(oldPhotoUrl, 'student-avatars');
+        if (oldPath) {
+          try {
+            await supabase.storage.from('student-avatars').remove([oldPath]);
+          } catch (storageErr) {
+            console.warn('Storage file cleanup warning (non-blocking):', storageErr);
+          }
+        }
+      }
     } else {
       const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
       const idx = students.findIndex((s) => s.id === studentId);
@@ -1782,12 +1864,25 @@ export const studentApi = {
       const originalAdmissionNo = students[idx].admission_no; // Preserve unique admission number
       updatedStudent = {
         ...students[idx],
-        ...studentUpdates,
+        ...normalizedUpdates,
         admission_no: originalAdmissionNo,
-        updated_at: new Date().toISOString(),
       };
+      if (normalizedUpdates.photo_url === null) {
+        delete (updatedStudent as any).photo_url;
+        updatedStudent.photo_url = undefined;
+      }
       students[idx] = updatedStudent;
       setStorage('students', [...students]);
+    }
+
+    if ('photo_url' in studentUpdates && oldPhotoUrl !== normalizedUpdates.photo_url) {
+      await logAudit(
+        actor || {},
+        normalizedUpdates.photo_url ? 'STUDENT_PHOTO_UPDATED' : 'STUDENT_PHOTO_REMOVED',
+        'students',
+        studentId,
+        { previous: oldPhotoUrl, updated: normalizedUpdates.photo_url }
+      );
     }
 
     // Handle section/class update for active session if provided

@@ -119,7 +119,7 @@ export interface Student {
   guardian_phone: string;
   emergency_contact?: string;
   address: string;
-  photo_url?: string;
+  photo_url?: string | null;
   blood_group?: string;
   is_active: boolean;
   portal_status?: 'not_provisioned' | 'active' | 'inactive';

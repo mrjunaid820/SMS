@@ -114,6 +114,7 @@ export const MyProfilePage: React.FC = () => {
       });
       setStudent((prev) => (prev ? { ...prev, photo_url: undefined } : null));
       setAvatarSuccess('Profile picture removed successfully.');
+      await loadProfile();
     } catch (err: any) {
       setAvatarError(err.message || 'Failed to remove profile picture. Please try again.');
     } finally {

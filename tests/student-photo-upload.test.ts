@@ -369,4 +369,211 @@ describe('Student Profile Photo Upload & Storage Security Suite', () => {
       expect(removeLog).toBeTruthy();
     });
   });
+
+  // --------------------------------------------------------------------------
+  // 8. PHOTO REMOVAL & CROSS-PORTAL SYNCHRONIZATION (TASK SPECIFIC TESTS)
+  // --------------------------------------------------------------------------
+  describe('8. Photo Removal & Cross-Portal Synchronization', () => {
+    it('TEST 1: Admin removes student photo via updateStudentWithEnrollment and saves. Reopening verifies photo remains removed', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students[0];
+
+      // 1. Initial photo set
+      await studentApi.uploadStudentPhoto(targetStudent.id, 'https://example.com/student-old.jpg', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      const studentBefore = (await studentApi.getStudents()).find((s) => s.id === targetStudent.id);
+      expect(studentBefore?.photo_url).toBe('https://example.com/student-old.jpg');
+
+      // 2. Admin clears photo in edit form and submits updateStudentWithEnrollment with photo_url: null
+      const updateResult = await studentApi.updateStudentWithEnrollment(
+        targetStudent.id,
+        {
+          full_name: targetStudent.full_name,
+          guardian_name: targetStudent.guardian_name,
+          guardian_phone: targetStudent.guardian_phone,
+          address: targetStudent.address,
+          photo_url: null, // Explicitly cleared
+        },
+        undefined,
+        undefined,
+        { id: 'admin-id', name: 'Admin', role: 'admin' }
+      );
+
+      expect(updateResult.student.photo_url).toBeFalsy();
+
+      // 3. Re-query from storage/database (simulating reopening Edit Student or refreshing browser)
+      const refreshedList = await studentApi.getStudents();
+      const reopenedStudent = refreshedList.find((s) => s.id === targetStudent.id);
+      expect(reopenedStudent?.photo_url).toBeUndefined();
+    });
+
+    it('TEST 2: Admin removes photo. Refresh Student Portal (getStudentSelf). Default avatar must appear', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students.find((s) => s.profile_id) || students[0];
+      const identifier = targetStudent.profile_id || targetStudent.id;
+
+      // Initial photo set
+      await studentApi.uploadStudentPhoto(targetStudent.id, 'https://example.com/photo-for-sync.png', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // Verify Student Portal sees it
+      const selfBefore = await studentPortalApi.getStudentSelf(identifier);
+      expect(selfBefore.student.photo_url).toBe('https://example.com/photo-for-sync.png');
+
+      // Admin removes photo
+      await studentApi.removeStudentPhoto(targetStudent.id, {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // Refresh Student Portal
+      const selfAfter = await studentPortalApi.getStudentSelf(identifier);
+      expect(selfAfter.student.photo_url).toBeFalsy();
+    });
+
+    it('TEST 3: Student removes their own photo. Refresh Admin Portal. Default avatar must appear', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students.find((s) => s.profile_id) || students[0];
+      const identifier = targetStudent.profile_id || targetStudent.id;
+
+      // Set photo
+      await studentApi.uploadStudentPhoto(targetStudent.id, 'https://example.com/student-active.png', {
+        id: identifier,
+        name: targetStudent.full_name,
+        role: 'student',
+      });
+
+      // Verify Admin sees it
+      const adminViewBefore = (await studentApi.getStudents()).find((s) => s.id === targetStudent.id);
+      expect(adminViewBefore?.photo_url).toBe('https://example.com/student-active.png');
+
+      // Student removes their own photo via student portal
+      const removeResult = await studentPortalApi.removeMyAvatar(identifier, {
+        id: identifier,
+        name: targetStudent.full_name,
+        role: 'student',
+      });
+      expect(removeResult.success).toBe(true);
+
+      // Refresh Admin Portal
+      const adminViewAfter = (await studentApi.getStudents()).find((s) => s.id === targetStudent.id);
+      expect(adminViewAfter?.photo_url).toBeUndefined();
+    });
+
+    it('TEST 4: Admin uploads a new photo after removing the old one. Both portals display the new photo', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students.find((s) => s.profile_id) || students[0];
+      const identifier = targetStudent.profile_id || targetStudent.id;
+
+      // 1. Initial photo upload
+      await studentApi.uploadStudentPhoto(targetStudent.id, 'https://example.com/first.png', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // 2. Remove photo
+      await studentApi.removeStudentPhoto(targetStudent.id, {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // 3. Upload new photo
+      const newFile = new File(['new-photo-bytes'], 'brand-new.png', { type: 'image/png' });
+      const newUpload = await studentApi.uploadStudentPhoto(targetStudent.id, newFile, {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      expect(newUpload.photo_url).toBeTruthy();
+
+      // Check Admin Portal
+      const adminView = (await studentApi.getStudents()).find((s) => s.id === targetStudent.id);
+      expect(adminView?.photo_url).toBe(newUpload.photo_url);
+
+      // Check Student Portal
+      const studentView = await studentPortalApi.getStudentSelf(identifier);
+      expect(studentView.student.photo_url).toBe(newUpload.photo_url);
+    });
+
+    it('TEST 5: Remove photo, simulate logout/login cycle, and verify old photo does not return', async () => {
+      const students = await studentApi.getStudents();
+      const targetStudent = students[0];
+
+      // Set photo
+      await studentApi.uploadStudentPhoto(targetStudent.id, 'https://example.com/temp.jpg', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // Admin removes photo
+      await studentApi.updateStudentWithEnrollment(
+        targetStudent.id,
+        {
+          full_name: targetStudent.full_name,
+          guardian_name: targetStudent.guardian_name,
+          guardian_phone: targetStudent.guardian_phone,
+          address: targetStudent.address,
+          photo_url: '', // Empty string clears photo
+        },
+        undefined,
+        undefined,
+        { id: 'admin-id', name: 'Admin', role: 'admin' }
+      );
+
+      // Simulate logout / login session reset (re-reading from storage cache)
+      const storedJson = localStorage.getItem('sms_students');
+      expect(storedJson).toBeTruthy();
+      const rehydratedStudents: Student[] = JSON.parse(storedJson!);
+      const verifiedStudent = rehydratedStudents.find((s) => s.id === targetStudent.id);
+
+      expect(verifiedStudent?.photo_url).toBeFalsy();
+    });
+
+    it('TEST 6: Verify that removing one student photo does NOT affect any other student photo', async () => {
+      const students = await studentApi.getStudents();
+      const studentA = students[0];
+      const studentB = students[1];
+
+      // Assign photos to both
+      await studentApi.uploadStudentPhoto(studentA.id, 'https://example.com/student-a.jpg', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+      await studentApi.uploadStudentPhoto(studentB.id, 'https://example.com/student-b.jpg', {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // Verify both have photos
+      let currentStudents = await studentApi.getStudents();
+      expect(currentStudents.find((s) => s.id === studentA.id)?.photo_url).toBe('https://example.com/student-a.jpg');
+      expect(currentStudents.find((s) => s.id === studentB.id)?.photo_url).toBe('https://example.com/student-b.jpg');
+
+      // Remove photo ONLY from student A
+      await studentApi.removeStudentPhoto(studentA.id, {
+        id: 'admin-id',
+        name: 'Admin',
+        role: 'admin',
+      });
+
+      // Verify student A has NO photo, but student B RETAINS their photo intact
+      currentStudents = await studentApi.getStudents();
+      expect(currentStudents.find((s) => s.id === studentA.id)?.photo_url).toBeUndefined();
+      expect(currentStudents.find((s) => s.id === studentB.id)?.photo_url).toBe('https://example.com/student-b.jpg');
+    });
+  });
 });

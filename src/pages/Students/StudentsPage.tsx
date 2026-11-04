@@ -305,6 +305,7 @@ export const StudentsPage: React.FC = () => {
       setPhotoMessage({ type: 'success', text: res.message });
       setSelectedStudent(res.student);
       setStudents((prev) => prev.map((s) => (s.id === res.student.id ? res.student : s)));
+      await loadData();
     } catch (err: any) {
       setPhotoMessage({ type: 'error', text: err.message || 'Failed to remove photo.' });
     } finally {
@@ -325,7 +326,12 @@ export const StudentsPage: React.FC = () => {
 
     setIsEditSubmitting(true);
     try {
-      await studentApi.updateStudentWithEnrollment(
+      // Explicitly normalize photo_url: if empty or cleared, send NULL so database column is cleared
+      const photoPayload = editFormData.photo_url && editFormData.photo_url.trim().length > 0
+        ? editFormData.photo_url.trim()
+        : null;
+
+      const result = await studentApi.updateStudentWithEnrollment(
         selectedStudent.id,
         {
           full_name: editFormData.full_name.trim(),
@@ -340,12 +346,16 @@ export const StudentsPage: React.FC = () => {
           address: editFormData.address.trim(),
           blood_group: editFormData.blood_group,
           admission_date: editFormData.admission_date,
-          photo_url: editFormData.photo_url ? editFormData.photo_url.trim() : undefined,
+          photo_url: photoPayload,
         },
         editFormData.section_id,
         selectedSessionId,
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
+
+      // Immediately synchronize React component state with the confirmed database record
+      setSelectedStudent(result.student);
+      setStudents((prev) => prev.map((s) => (s.id === result.student.id ? result.student : s)));
 
       setEditSuccess(`Student record for "${editFormData.full_name}" updated successfully.`);
       await loadData();
@@ -1760,15 +1770,23 @@ export const StudentsPage: React.FC = () => {
                         size="sm"
                         variant="ghost"
                         onClick={() => setEditFormData((prev) => ({ ...prev, photo_url: '' }))}
-                        className="text-slate-500 hover:text-slate-700 text-xs"
+                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-semibold"
+                        title="Remove photo (click Save Changes to apply to database)"
                       >
-                        Clear
+                        <Trash2 className="w-3.5 h-3.5 mr-1" />
+                        Remove Photo
                       </Button>
                     )}
                   </div>
                   <p className="text-[10px] text-slate-400">JPG, PNG, WEBP or GIF up to 5MB</p>
                 </div>
               </div>
+              {!editFormData.photo_url && selectedStudent?.photo_url && (
+                <div className="p-2 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>Photo marked for removal. Click <strong>Save Changes</strong> below to update the database.</span>
+                </div>
+              )}
               <Input
                 label="Or Image URL (Optional)"
                 placeholder="https://example.com/photo.jpg"
