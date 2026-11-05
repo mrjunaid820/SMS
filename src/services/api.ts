@@ -2157,6 +2157,170 @@ export const studentApi = {
     return { profile: newProfile, student: updatedStudent };
   },
 
+  updateStudentLoginEmail: async (
+    studentId: string,
+    newEmail: string,
+    actor?: { id?: string; name?: string; role?: string }
+  ): Promise<{ success: boolean; message: string }> => {
+    const effectiveRole = actor?.role || getStorage<any>('sms_current_user', null)?.role;
+    if (effectiveRole && effectiveRole !== 'admin') {
+      throw new Error('Unauthorized: Only administrators are authorized to update student login information.');
+    }
+
+    const trimmedEmail = newEmail.trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      throw new Error('Validation Error: A valid email address is required.');
+    }
+
+    if (isLiveSupabaseConfigured()) {
+      const { data: student, error: sErr } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', studentId)
+        .single();
+      if (sErr || !student) throw new Error('Student record not found.');
+
+      // Check duplicate email in profiles
+      const { data: dupProf } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', trimmedEmail)
+        .neq('id', student.profile_id || '')
+        .maybeSingle();
+
+      if (dupProf) {
+        throw new Error(`Validation Error: The email address "${newEmail}" is already registered to another user account.`);
+      }
+
+      // 1. Try atomic PostgreSQL RPC first
+      try {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_update_student_login_email', {
+          p_student_id: studentId,
+          p_new_email: trimmedEmail,
+        });
+
+        if (!rpcErr && rpcData && rpcData.success) {
+          try {
+            const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+            if (student.email && passMap[student.email.toLowerCase()]) {
+              passMap[trimmedEmail] = passMap[student.email.toLowerCase()];
+              localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+            }
+          } catch {}
+
+          return { success: true, message: rpcData.message || `Student login email successfully updated to ${trimmedEmail}.` };
+        } else if (rpcErr && !rpcErr.message.includes('Could not find the function') && !rpcErr.message.includes('function public.admin_update_student_login_email')) {
+          throw new Error(rpcErr.message);
+        }
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Could not find the function') && !err.message.includes('function public.admin_update_student_login_email')) {
+          throw err;
+        }
+      }
+
+      // 2. Try Edge Function
+      try {
+        const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('admin-manage-user', {
+          body: {
+            action: 'update_login_email',
+            studentId,
+            userId: student.profile_id,
+            newEmail: trimmedEmail,
+          },
+        });
+        if (!edgeErr && edgeData && edgeData.success) {
+          try {
+            const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+            if (student.email && passMap[student.email.toLowerCase()]) {
+              passMap[trimmedEmail] = passMap[student.email.toLowerCase()];
+              localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+            }
+          } catch {}
+
+          await logAudit(actor || {}, 'STUDENT_LOGIN_EMAIL_UPDATED', 'students', studentId, {
+            target_user_id: student.profile_id,
+            previous_email: student.email,
+            new_email: trimmedEmail,
+          });
+          return { success: true, message: `Student login email successfully updated to ${trimmedEmail}.` };
+        }
+      } catch (e) {
+        // Fall back to direct database updates
+      }
+
+      if (student.profile_id) {
+        await supabase
+          .from('profiles')
+          .update({ email: trimmedEmail, updated_at: new Date().toISOString() })
+          .eq('id', student.profile_id);
+      }
+      await supabase
+        .from('students')
+        .update({ email: trimmedEmail, updated_at: new Date().toISOString() })
+        .eq('id', studentId);
+
+      await logAudit(actor || {}, 'STUDENT_LOGIN_EMAIL_UPDATED', 'students', studentId, {
+        target_user_id: student.profile_id,
+        previous_email: student.email,
+        new_email: trimmedEmail,
+      });
+
+      return { success: true, message: `Student login email successfully updated to ${trimmedEmail}.` };
+    }
+
+    const students = getStorage<Student[]>('students', INITIAL_STUDENTS);
+    const sIdx = students.findIndex((s) => s.id === studentId);
+    if (sIdx === -1) throw new Error('Student record not found.');
+
+    const profiles = getStorage<Profile[]>('profiles', INITIAL_PROFILES);
+    const student = students[sIdx];
+
+    const duplicateProfile = profiles.find(
+      (p) => p.email.toLowerCase() === trimmedEmail && p.id !== student.profile_id
+    );
+    const duplicateStudent = students.find(
+      (s) => s.email && s.email.toLowerCase() === trimmedEmail && s.id !== studentId
+    );
+
+    if (duplicateProfile || duplicateStudent) {
+      throw new Error(`Validation Error: The email address "${newEmail}" is already registered to another user account.`);
+    }
+
+    const oldEmail = student.email;
+    students[sIdx] = { ...student, email: trimmedEmail };
+    setStorage('students', [...students]);
+
+    const pIdx = profiles.findIndex(
+      (p) => p.id === student.profile_id || (oldEmail && p.email.toLowerCase() === oldEmail.toLowerCase())
+    );
+    if (pIdx !== -1) {
+      profiles[pIdx] = { ...profiles[pIdx], email: trimmedEmail, updated_at: new Date().toISOString() };
+      setStorage('profiles', [...profiles]);
+    }
+
+    try {
+      const passMap = JSON.parse(localStorage.getItem('sms_user_passwords') || '{}');
+      if (oldEmail && passMap[oldEmail.toLowerCase()]) {
+        passMap[trimmedEmail] = passMap[oldEmail.toLowerCase()];
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      }
+      if (student.profile_id && passMap[student.profile_id]) {
+        passMap[trimmedEmail] = passMap[student.profile_id];
+        localStorage.setItem('sms_user_passwords', JSON.stringify(passMap));
+      }
+    } catch {}
+
+    await logAudit(
+      actor || {},
+      'STUDENT_LOGIN_EMAIL_UPDATED',
+      'students',
+      studentId,
+      { target_user_id: student.profile_id, previous_email: student.email, new_email: trimmedEmail }
+    );
+
+    return { success: true, message: `Student login email successfully updated to ${trimmedEmail}.` };
+  },
+
   resetStudentPassword: async (
     studentId: string,
     optionsOrPassword: string | { temporaryPassword?: string; sendResetLink?: boolean },

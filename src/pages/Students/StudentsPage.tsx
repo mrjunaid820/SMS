@@ -39,6 +39,10 @@ import {
   AlertCircle,
   Check,
   Camera,
+  Mail,
+  Lock,
+  Copy,
+  Sparkles,
 } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
@@ -66,16 +70,17 @@ export const StudentsPage: React.FC = () => {
   const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
 
-  // Student Portal Account Provisioning Modal
+  // Student Manage Credentials Modal State
   const [isPortalModalOpen, setIsPortalModalOpen] = useState(false);
   const [portalStudent, setPortalStudent] = useState<Student | null>(null);
-  const [portalEmail, setPortalEmail] = useState('');
-  const [portalPassword, setPortalPassword] = useState('');
-  const [portalConfirmPassword, setPortalConfirmPassword] = useState('');
-  const [showPortalPassword, setShowPortalPassword] = useState(false);
-  const [showPortalConfirmPassword, setShowPortalConfirmPassword] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
-  const [portalPasswordLoading, setPortalPasswordLoading] = useState(false);
+  const [newStudentLoginEmail, setNewStudentLoginEmail] = useState('');
+  const [studentPasswordMethod, setStudentPasswordMethod] = useState<'temp' | 'link'>('temp');
+  const [studentTemporaryPassword, setStudentTemporaryPassword] = useState('');
+  const [showStudentPassword, setShowStudentPassword] = useState(false);
+  const [copiedStudentCredentials, setCopiedStudentCredentials] = useState(false);
+  const [isStudentEmailSubmitting, setIsStudentEmailSubmitting] = useState(false);
+  const [isStudentPasswordSubmitting, setIsStudentPasswordSubmitting] = useState(false);
+  const [isStudentStatusSubmitting, setIsStudentStatusSubmitting] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
   const [portalSuccess, setPortalSuccess] = useState<string | null>(null);
 
@@ -146,6 +151,18 @@ export const StudentsPage: React.FC = () => {
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
+
+  const { activeStudentClassSection, activeStudentRollNo } = useMemo(() => {
+    if (!portalStudent) return { activeStudentClassSection: 'Unassigned', activeStudentRollNo: 'N/A' };
+    const enr = enrollments.find((e) => e.student_id === portalStudent.id);
+    const sec = enr?.section || sections.find((s) => s.id === enr?.section_id);
+    const cls = sec?.class || classes.find((c) => c.id === sec?.class_id);
+    const classStr = cls ? cls.name : 'Class';
+    const sectionStr = sec ? sec.name : '';
+    const classSec = sec ? `${classStr} - ${sectionStr}` : (cls ? cls.name : 'Unassigned');
+    const roll = enr?.roll_no ? `${enr.roll_no}` : 'N/A';
+    return { activeStudentClassSection: classSec, activeStudentRollNo: roll };
+  }, [portalStudent, enrollments, sections, classes]);
 
   // Form State for Add
   const [formData, setFormData] = useState({
@@ -443,22 +460,23 @@ export const StudentsPage: React.FC = () => {
     setPortalStudent(student);
     setPortalError(null);
     setPortalSuccess(null);
-    setShowPortalPassword(false);
-    setShowPortalConfirmPassword(false);
-    if (student.profile_id || student.email) {
-      setPortalPassword('');
-      setPortalConfirmPassword('');
-    } else {
-      setPortalPassword('Student123!');
-      setPortalConfirmPassword('Student123!');
-    }
+    setShowStudentPassword(false);
+    setCopiedStudentCredentials(false);
+    setStudentPasswordMethod('temp');
+
     if (student.email) {
-      setPortalEmail(student.email.trim());
+      setNewStudentLoginEmail(student.email.trim());
     } else {
       const sanitizedAdmission = (student.admission_no || 'stu')
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '');
-      setPortalEmail(`student.${sanitizedAdmission}@islamiapublic.edu.pk`);
+      setNewStudentLoginEmail(`student.${sanitizedAdmission}@islamiapublic.edu.pk`);
+    }
+
+    if (student.profile_id || student.email) {
+      setStudentTemporaryPassword(`Stu-${Math.random().toString(36).slice(-6)}!`);
+    } else {
+      setStudentTemporaryPassword('Student123!');
     }
     setIsPortalModalOpen(true);
   };
@@ -469,80 +487,94 @@ export const StudentsPage: React.FC = () => {
     setPortalError(null);
     setPortalSuccess(null);
 
-    const cleanEmail = portalEmail.trim().toLowerCase();
+    const cleanEmail = newStudentLoginEmail.trim().toLowerCase();
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       setPortalError('Please provide a valid login email address (e.g. student.adm001@islamiapublic.edu.pk).');
       return;
     }
-    if (!portalPassword || portalPassword.length < 6) {
+    if (!studentTemporaryPassword || studentTemporaryPassword.length < 6) {
       setPortalError('Initial password must be at least 6 characters.');
       return;
     }
 
-    setPortalLoading(true);
+    setIsStudentPasswordSubmitting(true);
     try {
       const res = await studentApi.provisionStudentAccount(
         portalStudent.id,
         cleanEmail,
-        portalPassword,
+        studentTemporaryPassword,
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
-      setPortalSuccess(`Portal account provisioned successfully! Login email: ${res.profile.email}. Initial password: ${portalPassword}`);
+      setPortalSuccess(`Portal account provisioned successfully! Official Login Email: ${res.profile.email}. Initial password: ${studentTemporaryPassword}`);
       await loadData();
-      setPortalStudent((prev) => (prev ? { ...prev, profile_id: res.profile.id, email: res.profile.email } : null));
-      setPortalPassword('');
-      setPortalConfirmPassword('');
+      setPortalStudent((prev) => (prev ? { ...prev, profile_id: res.profile.id, email: res.profile.email, portal_status: 'active' } : null));
     } catch (err: any) {
       setPortalError(err.message || 'Failed to provision portal account.');
     } finally {
-      setPortalLoading(false);
+      setIsStudentPasswordSubmitting(false);
     }
   };
 
-  const handleResetPortalPassword = async () => {
+  const handleUpdateStudentEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!portalStudent) return;
     setPortalError(null);
     setPortalSuccess(null);
 
-    const cleanPassword = portalPassword.trim();
-    const cleanConfirm = portalConfirmPassword.trim();
-
-    if (!cleanPassword) {
-      setPortalError('Please enter a new password.');
+    const cleanEmail = newStudentLoginEmail.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setPortalError('Validation Error: Please enter a valid email address.');
       return;
     }
 
-    if (cleanPassword.length < 6) {
-      setPortalError('New password must be at least 6 characters in length.');
+    if (cleanEmail === (portalStudent.email || '').toLowerCase()) {
+      setPortalError('Validation Error: The new email address is identical to the current login email.');
       return;
     }
 
-    if (!cleanConfirm) {
-      setPortalError('Please confirm the new password.');
+    setIsStudentEmailSubmitting(true);
+    try {
+      const res = await studentApi.updateStudentLoginEmail(
+        portalStudent.id,
+        cleanEmail,
+        { id: user?.id, name: user?.full_name, role: user?.role }
+      );
+      setPortalSuccess(res.message);
+      setPortalStudent((prev) => (prev ? { ...prev, email: cleanEmail } : null));
+      await loadData();
+    } catch (err: any) {
+      setPortalError(err.message || 'Database error: Failed to update student login email.');
+    } finally {
+      setIsStudentEmailSubmitting(false);
+    }
+  };
+
+  const handleResetStudentPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portalStudent) return;
+    setPortalError(null);
+    setPortalSuccess(null);
+
+    if (studentPasswordMethod === 'temp' && (!studentTemporaryPassword || studentTemporaryPassword.length < 6)) {
+      setPortalError('Validation Error: Temporary password must be at least 6 characters.');
       return;
     }
 
-    if (cleanPassword !== cleanConfirm) {
-      setPortalError('New password and Confirm Password do not match. Please re-enter.');
-      return;
-    }
-
-    setPortalPasswordLoading(true);
+    setIsStudentPasswordSubmitting(true);
     try {
       const res = await studentApi.resetStudentPassword(
         portalStudent.id,
-        cleanPassword,
+        {
+          temporaryPassword: studentPasswordMethod === 'temp' ? studentTemporaryPassword : undefined,
+          sendResetLink: studentPasswordMethod === 'link',
+        },
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
-      setPortalSuccess(res.message || `Password reset successfully for ${portalStudent.full_name}.`);
-      setPortalPassword('');
-      setPortalConfirmPassword('');
-      setShowPortalPassword(false);
-      setShowPortalConfirmPassword(false);
+      setPortalSuccess(res.message);
     } catch (err: any) {
-      setPortalError(err.message || 'Failed to reset password.');
+      setPortalError(err.message || 'Database error: Failed to process password reset.');
     } finally {
-      setPortalPasswordLoading(false);
+      setIsStudentPasswordSubmitting(false);
     }
   };
 
@@ -551,18 +583,24 @@ export const StudentsPage: React.FC = () => {
     setPortalError(null);
     setPortalSuccess(null);
 
-    setPortalLoading(true);
+    setIsStudentStatusSubmitting(true);
     try {
       const res = await studentApi.toggleStudentAccountStatus(
         portalStudent.id,
         { id: user?.id, name: user?.full_name, role: user?.role }
       );
-      setPortalSuccess(`Account is now ${res.profile.is_active ? 'Active' : 'Deactivated'}.`);
+      const newStatus = res.is_active ? 'active' : 'inactive';
+      setPortalStudent((prev) => (prev ? { ...prev, portal_status: newStatus } : null));
+      setPortalSuccess(
+        res.is_active
+          ? `Student portal access has been reactivated for ${portalStudent.full_name}. The student can log in again.`
+          : `Student portal access has been deactivated for ${portalStudent.full_name}. Login access is now blocked.`
+      );
       await loadData();
     } catch (err: any) {
-      setPortalError(err.message || 'Failed to update account status.');
+      setPortalError(err.message || 'Database error: Failed to update portal access status.');
     } finally {
-      setPortalLoading(false);
+      setIsStudentStatusSubmitting(false);
     }
   };
 
@@ -1069,7 +1107,7 @@ export const StudentsPage: React.FC = () => {
                 <button
                   onClick={() => handleOpenPortalModal(row)}
                   className="p-1.5 text-brand-600 hover:text-brand-800 dark:hover:text-brand-300 rounded-md hover:bg-brand-50 dark:hover:bg-brand-950/40"
-                  title="Manage Portal Credentials & Password"
+                  title="Manage Credentials"
                 >
                   <KeyRound className="w-4 h-4" />
                 </button>
@@ -1599,16 +1637,28 @@ export const StudentsPage: React.FC = () => {
 
             <div className="flex justify-between items-center pt-2 border-t border-slate-100 dark:border-slate-800">
               {isAdmin ? (
-                <Button
-                  variant="outline"
-                  leftIcon={<Pencil className="w-4 h-4" />}
-                  onClick={() => {
-                    setIsProfileModalOpen(false);
-                    if (selectedStudent) handleOpenEdit(selectedStudent);
-                  }}
-                >
-                  Edit Student
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    leftIcon={<Pencil className="w-4 h-4" />}
+                    onClick={() => {
+                      setIsProfileModalOpen(false);
+                      if (selectedStudent) handleOpenEdit(selectedStudent);
+                    }}
+                  >
+                    Edit Student
+                  </Button>
+                  <Button
+                    variant="outline"
+                    leftIcon={<KeyRound className="w-4 h-4 text-brand-500" />}
+                    onClick={() => {
+                      setIsProfileModalOpen(false);
+                      if (selectedStudent) handleOpenPortalModal(selectedStudent);
+                    }}
+                  >
+                    Manage Credentials
+                  </Button>
+                </div>
               ) : <div />}
               <Button onClick={() => setIsProfileModalOpen(false)}>Done</Button>
             </div>
@@ -1971,229 +2021,421 @@ export const StudentsPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* 5. Student Portal Account Management Modal */}
+      {/* 5. Modal: Manage Student Login & Credentials */}
       <Modal
         isOpen={isPortalModalOpen}
         onClose={() => {
           setIsPortalModalOpen(false);
           setPortalError(null);
           setPortalSuccess(null);
-          setPortalPassword('');
-          setPortalConfirmPassword('');
-          setShowPortalPassword(false);
-          setShowPortalConfirmPassword(false);
+          setShowStudentPassword(false);
+          setCopiedStudentCredentials(false);
         }}
-        title={`Student Portal Access — ${portalStudent?.full_name || ''}`}
-        size="md"
+        title={
+          portalStudent
+            ? portalStudent.profile_id || portalStudent.email
+              ? `Manage Credentials: ${portalStudent.full_name}`
+              : `Provision Portal Access: ${portalStudent.full_name}`
+            : 'Manage Student Credentials'
+        }
+        description="Administrator-controlled login identity and credential management"
+        size="lg"
       >
-        <div className="space-y-4">
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                {portalStudent?.full_name} ({portalStudent?.admission_no})
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Guardian: {portalStudent?.guardian_name} ({portalStudent?.guardian_phone})
-              </div>
-            </div>
-            <Badge variant={portalStudent?.profile_id || portalStudent?.email ? 'info' : 'default'}>
-              {portalStudent?.profile_id || portalStudent?.email ? 'Provisioned' : 'Not Provisioned'}
-            </Badge>
-          </div>
-
+        <div className="space-y-6">
           {portalError && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-              <span>{portalError}</span>
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{portalError}</span>
+              </div>
+              <button onClick={() => setPortalError(null)} className="text-rose-400 hover:text-rose-600 text-xs">
+                &times;
+              </button>
             </div>
           )}
 
           {portalSuccess && (
-            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-              <span>{portalSuccess}</span>
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{portalSuccess}</span>
+              </div>
+              <button onClick={() => setPortalSuccess(null)} className="text-emerald-400 hover:text-emerald-600 text-xs">
+                &times;
+              </button>
             </div>
           )}
 
-          {portalStudent?.profile_id || portalStudent?.email ? (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Linked Student Login Email
-                </label>
-                <input
-                  type="text"
-                  readOnly
-                  disabled
-                  value={portalStudent.email || portalEmail}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono"
-                />
-              </div>
+          {/* Student Account Overview: All 8 Required Fields */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/70 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div>
+              <span className="text-slate-500">Student Name:</span>{' '}
+              <span className="font-bold text-slate-800 dark:text-slate-200">{portalStudent?.full_name}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Admission Number:</span>{' '}
+              <span className="font-mono font-semibold text-navy-900 dark:text-brand-400">{portalStudent?.admission_no}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Class & Section:</span>{' '}
+              <span className="font-semibold text-slate-800 dark:text-slate-200">{activeStudentClassSection}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Roll Number:</span>{' '}
+              <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{activeStudentRollNo}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Guardian Name:</span>{' '}
+              <span className="font-medium text-slate-800 dark:text-slate-200">{portalStudent?.guardian_name || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Guardian Contact:</span>{' '}
+              <span className="font-mono text-slate-800 dark:text-slate-200">{portalStudent?.guardian_phone || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Official Student Email:</span>{' '}
+              <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{portalStudent?.email || 'Not Configured'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Portal Access Status:</span>{' '}
+              {portalStudent?.portal_status === 'not_provisioned' || (!portalStudent?.profile_id && !portalStudent?.email) ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-amber-600 dark:text-amber-400">
+                  <UserX className="w-3.5 h-3.5" /> Not Provisioned
+                </span>
+              ) : portalStudent?.portal_status === 'inactive' ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
+                  <UserX className="w-3.5 h-3.5" /> Inactive (Access Blocked)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                  <UserCheck className="w-3.5 h-3.5" /> Active & Linked
+                </span>
+              )}
+            </div>
+          </div>
 
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-navy-700 dark:text-sky-400" />
-                    Reset Account Password
-                  </h4>
-                  <span className="text-[11px] text-slate-500">Min 6 characters</span>
+          {/* Conditional Workflow: Provision Account vs Manage Credentials */}
+          {!portalStudent?.profile_id && !portalStudent?.email ? (
+            /* Workflow: PROVISION UNLINKED STUDENT */
+            <div className="p-4 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg text-amber-700 dark:text-amber-300">
+                  <UserPlus className="w-5 h-5" />
                 </div>
-
-                <div className="space-y-3 bg-slate-50 dark:bg-slate-900/40 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                      New Password <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPortalPassword ? 'text' : 'password'}
-                        value={portalPassword}
-                        onChange={(e) => setPortalPassword(e.target.value)}
-                        placeholder="Enter new password (min 6 characters)"
-                        className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPortalPassword(!showPortalPassword)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
-                        aria-label={showPortalPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Confirm Password <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPortalConfirmPassword ? 'text' : 'password'}
-                        value={portalConfirmPassword}
-                        onChange={(e) => setPortalConfirmPassword(e.target.value)}
-                        placeholder="Confirm new password"
-                        className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPortalConfirmPassword(!showPortalConfirmPassword)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
-                        aria-label={showPortalConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-                      >
-                        {showPortalConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  {portalPassword && portalConfirmPassword && portalPassword !== portalConfirmPassword && (
-                    <div className="flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Passwords do not match</span>
-                    </div>
-                  )}
-
-                  {portalPassword && portalPassword.length > 0 && portalPassword.length < 6 && (
-                    <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Password must be at least 6 characters</span>
-                    </div>
-                  )}
-
-                  <div className="pt-1 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      isLoading={portalPasswordLoading}
-                      onClick={handleResetPortalPassword}
-                      disabled={
-                        !portalPassword ||
-                        !portalConfirmPassword ||
-                        portalPassword.length < 6 ||
-                        portalPassword !== portalConfirmPassword
-                      }
-                    >
-                      <KeyRound className="w-3.5 h-3.5 mr-1.5" />
-                      Set Password
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                 <div>
-                  <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
-                    Account Portal Access Status
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Activate Student Portal Account
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                    This student does not currently have an active login account in Supabase Auth. Confirm the official student email address and set the initial password to grant portal access.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleProvisionPortalAccount} className="space-y-4 pt-1">
+                <Input
+                  label="Student Login Email Address"
+                  type="email"
+                  required
+                  placeholder="student.name@islamiapublic.edu.pk"
+                  value={newStudentLoginEmail}
+                  onChange={(e) => setNewStudentLoginEmail(e.target.value)}
+                />
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Initial Portal Password
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setStudentTemporaryPassword('Student123!')}
+                        className="text-[11px] text-brand-600 hover:text-brand-700 dark:text-brand-400 underline font-medium"
+                      >
+                        Use Default (Student123!)
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setStudentTemporaryPassword(`Stu-${Math.random().toString(36).slice(-6)}!`)}
+                        className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1 font-medium"
+                      >
+                        <Sparkles className="w-3 h-3" /> Generate Random
+                      </button>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-500">
-                    {portalStudent.portal_status === 'inactive'
-                      ? 'Currently Deactivated — Student cannot log in'
-                      : 'Currently Active — Student can log in'}
+
+                  <div className="relative">
+                    <input
+                      type={showStudentPassword ? 'text' : 'password'}
+                      required
+                      placeholder="Minimum 6 characters"
+                      value={studentTemporaryPassword}
+                      onChange={(e) => setStudentTemporaryPassword(e.target.value)}
+                      className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowStudentPassword(!showStudentPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
+                      aria-label={showStudentPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showStudentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={portalStudent.portal_status === 'inactive' ? 'primary' : 'danger'}
-                  isLoading={portalLoading}
-                  onClick={handleTogglePortalStatus}
-                >
-                  {portalStudent.portal_status === 'inactive' ? 'Reactivate Access' : 'Deactivate Access'}
-                </Button>
-              </div>
+
+                {/* Credential Slip for Admin */}
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="text-xs truncate">
+                    <span className="text-slate-500">Credentials: </span>
+                    <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                      {newStudentLoginEmail || 'email'} / {studentTemporaryPassword || 'password'}
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    leftIcon={copiedStudentCredentials ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(`Student: ${portalStudent?.full_name || ''}\nAdmission No: ${portalStudent?.admission_no || ''}\nEmail: ${newStudentLoginEmail}\nPassword: ${studentTemporaryPassword}`);
+                      setCopiedStudentCredentials(true);
+                      setTimeout(() => setCopiedStudentCredentials(false), 2000);
+                    }}
+                    disabled={!studentTemporaryPassword}
+                  >
+                    {copiedStudentCredentials ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button type="submit" size="sm" isLoading={isStudentPasswordSubmitting} leftIcon={<UserCheck className="w-4 h-4" />}>
+                    Activate Portal Account
+                  </Button>
+                </div>
+              </form>
             </div>
           ) : (
-            <form onSubmit={handleProvisionPortalAccount} className="space-y-3">
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Create a dedicated login profile for this student. Once provisioned, the student can log in to view their own quiz marks, class daily diary, and academic record.
-              </p>
+            /* Workflow: MANAGE PROVISIONED STUDENT */
+            <>
+              {/* SECTION 1: Update Student Login Email / Identity */}
+              <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-brand-600" />
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                    1. Update Student Login Email / Identity
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Updates the student login identity in Supabase Auth and synchronizes linked profile records while preserving admission history, fee records, and exam marks.
+                </p>
 
-              <Input
-                label="Student Login Email"
-                type="email"
-                required
-                value={portalEmail}
-                onChange={(e) => setPortalEmail(e.target.value)}
-                placeholder="e.g. student@school.edu.pk"
-              />
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                    Current Student Login Email
+                  </label>
+                  <div className="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 font-mono text-slate-700 dark:text-slate-300">
+                    {portalStudent?.email || 'No active email configured'}
+                  </div>
+                </div>
 
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Initial Password <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPortalPassword ? 'text' : 'password'}
+                <form onSubmit={handleUpdateStudentEmail} className="space-y-3">
+                  <Input
+                    label="New Login Email Address"
+                    type="email"
                     required
-                    value={portalPassword}
-                    onChange={(e) => setPortalPassword(e.target.value)}
-                    placeholder="Enter password (min 6 characters)"
-                    className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500"
+                    placeholder="student.new@islamiapublic.edu.pk"
+                    value={newStudentLoginEmail}
+                    onChange={(e) => setNewStudentLoginEmail(e.target.value)}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPortalPassword(!showPortalPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
-                    aria-label={showPortalPassword ? 'Hide password' : 'Show password'}
+
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" isLoading={isStudentEmailSubmitting}>
+                      Update Login Email
+                    </Button>
+                  </div>
+                </form>
+              </div>
+
+              {/* SECTION 2: Administrator-Controlled Password Reset */}
+              <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-600" />
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                    2. Administrator-Controlled Password Reset
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Students cannot reset passwords directly. As an Administrator, setting a new temporary password updates Supabase Auth and allows the student to log in immediately.
+                </p>
+
+                <form onSubmit={handleResetStudentPassword} className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label
+                      className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 transition-colors ${
+                        studentPasswordMethod === 'temp'
+                          ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <input
+                          type="radio"
+                          name="studentPasswordMethod"
+                          checked={studentPasswordMethod === 'temp'}
+                          onChange={() => setStudentPasswordMethod('temp')}
+                        />
+                        <span>Temporary Password</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">
+                        Assign immediate password & revoke existing sessions
+                      </span>
+                    </label>
+
+                    <label
+                      className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 transition-colors ${
+                        studentPasswordMethod === 'link'
+                          ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-brand-900 dark:text-brand-300'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <input
+                          type="radio"
+                          name="studentPasswordMethod"
+                          checked={studentPasswordMethod === 'link'}
+                          onChange={() => setStudentPasswordMethod('link')}
+                        />
+                        <span>Dispatch Reset Link</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">
+                        Send secure password recovery link to student email
+                      </span>
+                    </label>
+                  </div>
+
+                  {studentPasswordMethod === 'temp' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                          Authorized Temporary Password
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setStudentTemporaryPassword('Student123!')}
+                            className="text-[11px] text-brand-600 hover:text-brand-700 dark:text-brand-400 underline font-medium"
+                          >
+                            Use Default (Student123!)
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setStudentTemporaryPassword(`Stu-${Math.random().toString(36).slice(-6)}!`)}
+                            className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1 font-medium"
+                          >
+                            <Sparkles className="w-3 h-3" /> Generate Random
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type={showStudentPassword ? 'text' : 'password'}
+                          required
+                          placeholder="Minimum 6 characters"
+                          value={studentTemporaryPassword}
+                          onChange={(e) => setStudentTemporaryPassword(e.target.value)}
+                          className="w-full px-3 py-2 pr-10 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-navy-900 dark:focus:ring-brand-500 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowStudentPassword(!showStudentPassword)}
+                          className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 focus:outline-none"
+                          aria-label={showStudentPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showStudentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+
+                      {/* Credential Slip for Admin */}
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 mt-2">
+                        <div className="text-xs truncate">
+                          <span className="text-slate-500">New Credentials: </span>
+                          <span className="font-mono font-bold text-navy-900 dark:text-brand-400">
+                            {portalStudent?.email || newStudentLoginEmail || 'email'} / {showStudentPassword ? (studentTemporaryPassword || 'password') : '••••••••'}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          leftIcon={copiedStudentCredentials ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          onClick={() => {
+                            const emailStr = portalStudent?.email || newStudentLoginEmail || '';
+                            navigator.clipboard.writeText(`Student: ${portalStudent?.full_name}\nAdmission No: ${portalStudent?.admission_no}\nEmail: ${emailStr}\nPassword: ${studentTemporaryPassword}`);
+                            setCopiedStudentCredentials(true);
+                            setTimeout(() => setCopiedStudentCredentials(false), 2000);
+                          }}
+                          disabled={!studentTemporaryPassword}
+                        >
+                          {copiedStudentCredentials ? 'Copied' : 'Copy'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="text-[10px] text-slate-400 italic">
+                      * Password change will be recorded in audit log without storing plaintext password.
+                    </span>
+                    <Button type="submit" size="sm" isLoading={isStudentPasswordSubmitting}>
+                      Confirm Password Reset
+                    </Button>
+                  </div>
+                </form>
+              </div>
+
+              {/* SECTION 3: Student Portal Access Status */}
+              <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider">
+                    3. Account Portal Access Status
+                  </h4>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <div>
+                    <div className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                      Current Access Status
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {portalStudent?.portal_status === 'inactive'
+                        ? 'Account Deactivated — Student login access is currently blocked.'
+                        : 'Account Active — Student can log in and view their academic records.'}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={portalStudent?.portal_status === 'inactive' ? 'primary' : 'danger'}
+                    isLoading={isStudentStatusSubmitting}
+                    onClick={handleTogglePortalStatus}
+                    leftIcon={portalStudent?.portal_status === 'inactive' ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
                   >
-                    {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                    {portalStudent?.portal_status === 'inactive' ? 'Activate Access' : 'Deactivate Access'}
+                  </Button>
                 </div>
               </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsPortalModalOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" isLoading={portalLoading}>
-                  Provision Portal Account
-                </Button>
-              </div>
-            </form>
+            </>
           )}
+
+          <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="outline" onClick={() => setIsPortalModalOpen(false)}>
+              Done
+            </Button>
+          </div>
         </div>
       </Modal>
 

@@ -391,6 +391,35 @@ serve(async (req: Request) => {
 
     // ACTION: UPDATE_LOGIN_EMAIL
     if (action === 'update_login_email') {
+      let targetUserId = userId || body.profileId;
+      if (!targetUserId && studentId) {
+        const { data: sData } = await adminSupabase
+          .from('students')
+          .select('profile_id')
+          .eq('id', studentId)
+          .maybeSingle();
+        if (sData?.profile_id) {
+          targetUserId = sData.profile_id;
+        }
+      }
+      if (!targetUserId && teacherId) {
+        const { data: tData } = await adminSupabase
+          .from('teachers')
+          .select('profile_id')
+          .eq('id', teacherId)
+          .maybeSingle();
+        if (tData?.profile_id) {
+          targetUserId = tData.profile_id;
+        }
+      }
+
+      if (!targetUserId) {
+        return new Response(
+          JSON.stringify({ error: 'Validation Error: User ID or linked Student/Teacher profile ID is required.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       const cleanNewEmail = (newEmail || '').trim().toLowerCase();
       if (!cleanNewEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanNewEmail)) {
         return new Response(
@@ -404,7 +433,7 @@ serve(async (req: Request) => {
         .from('profiles')
         .select('id')
         .eq('email', cleanNewEmail)
-        .neq('id', userId)
+        .neq('id', targetUserId)
         .maybeSingle();
 
       if (duplicateProfile) {
@@ -416,7 +445,7 @@ serve(async (req: Request) => {
 
       // Update in Supabase Auth via Admin API
       const { error: authUpdateErr } = await adminSupabase.auth.admin.updateUserById(
-        userId,
+        targetUserId,
         { email: cleanNewEmail, email_confirm: true }
       );
 
@@ -431,7 +460,7 @@ serve(async (req: Request) => {
       await adminSupabase
         .from('profiles')
         .update({ email: cleanNewEmail, updated_at: new Date().toISOString() })
-        .eq('id', userId);
+        .eq('id', targetUserId);
 
       // Update in public.teachers if teacherId provided
       if (teacherId) {
@@ -455,8 +484,8 @@ serve(async (req: Request) => {
           actor_id: user.id,
           action: 'LOGIN_EMAIL_UPDATED',
           entity_type: 'profiles',
-          entity_id: userId,
-          details: { target_user_id: userId, new_email: cleanNewEmail },
+          entity_id: targetUserId,
+          details: { target_user_id: targetUserId, new_email: cleanNewEmail },
           created_at: new Date().toISOString(),
         },
       ]);
