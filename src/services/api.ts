@@ -385,8 +385,14 @@ export const academicStructureApi = {
     if (isLiveSupabaseConfigured()) {
       let insertRes = await supabase.from('subjects').insert([dbPayload]).select('*, class:classes(*)').single();
       
-      // If error is PGRST204 (column is_active or description not yet in schema cache), retry with base schema columns
-      if (insertRes.error && (insertRes.error.code === 'PGRST204' || insertRes.error.message?.includes('schema cache'))) {
+      // If error is PGRST204 or 42703 (column is_active or description not yet in schema cache/table), retry with base schema columns
+      if (
+        insertRes.error &&
+        (insertRes.error.code === 'PGRST204' ||
+          insertRes.error.code === '42703' ||
+          insertRes.error.message?.includes('schema cache') ||
+          insertRes.error.message?.includes('does not exist'))
+      ) {
         const { is_active, description, ...basePayload } = dbPayload;
         insertRes = await supabase.from('subjects').insert([basePayload]).select('*, class:classes(*)').single();
       }
@@ -447,8 +453,14 @@ export const academicStructureApi = {
       // 1. Attempt update with all payload columns including is_active
       let updateRes = await supabase.from('subjects').update(dbPayload).eq('id', id).select('*, class:classes(*)').single();
 
-      // If the remote table schema cache does not have is_active or description yet (PGRST204)
-      if (updateRes.error && (updateRes.error.code === 'PGRST204' || updateRes.error.message?.includes('schema cache'))) {
+      // If the remote table schema does not have is_active or description yet (PGRST204 / 42703)
+      if (
+        updateRes.error &&
+        (updateRes.error.code === 'PGRST204' ||
+          updateRes.error.code === '42703' ||
+          updateRes.error.message?.includes('schema cache') ||
+          updateRes.error.message?.includes('does not exist'))
+      ) {
         const { is_active, description, ...baseDbPayload } = dbPayload;
         if (Object.keys(baseDbPayload).length > 0) {
           const fallbackRes = await supabase.from('subjects').update(baseDbPayload).eq('id', id).select('*, class:classes(*)').single();
